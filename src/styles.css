@@ -509,3 +509,31 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .sig-tile .icon { position: absolute; top: 4px; right: 4px; color: #4a5266; }
 .drop { display: grid; place-items: center; padding: 40px 20px; text-align: center; border: 1.5px dashed var(--line-strong); border-radius: var(--r); color: var(--text-2); cursor: pointer; transition: border-color 120ms, color 120ms; }
 .drop:hover { border-color: var(--cyan); color: var(--cyan); }
+
+/* Tracker */
+.tracker-scroll { flex: 1; overflow: auto; padding: 24px 24px 96px; }
+.tracker-summary { max-width: 1200px; margin: 0 auto 20px; font-size: 19px; font-weight: 450; line-height: 1.45; color: var(--text-2); letter-spacing: -0.005em; }
+.tracker-summary b { color: var(--text); font-weight: 650; }
+.tracker-summary b.warn { color: var(--danger); }
+.tracker-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1200px; margin: 0 auto; align-items: start; }
+@media (max-width: 1100px) { .tracker-cols { grid-template-columns: 1fr; } }
+.sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.sec-head h3 { margin: 0; font-size: 14px; font-weight: 650; }
+.journal-head { margin-top: 26px; }
+.add-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.add-row input:first-child { flex: 1; }
+.add-row input[type="date"] { width: 140px; }
+.tasks { margin: 0; padding: 0; list-style: none; }
+.tasks li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line-soft); }
+.task-title { flex: 1; min-width: 0; background: transparent; border-color: transparent; }
+.tasks li input[type="date"] { width: 128px; background: transparent; border-color: transparent; font-size: 12px; color: var(--text-3); }
+.tasks li input[type="date"]:hover, .task-title:hover { border-color: var(--line); }
+.tasks li.late input[type="date"] { color: var(--danger); }
+.tasks li.done .task-title { color: var(--text-3); text-decoration: line-through; }
+.prio { width: 84px; background: transparent; border-color: transparent; font-size: 12px; color: var(--text-2); }
+.prio:hover { border-color: var(--line); }
+.prio.p2 { color: var(--danger); }
+.prio.p0 { color: var(--text-3); }
+.tasks .icon { opacity: 0; }
+.tasks li:hover .icon, .tasks li:focus-within .icon { opacity: 1; }
+.empty-row { justify-content: center; padding: 18px 0 !important; color: var(--text-3); }
