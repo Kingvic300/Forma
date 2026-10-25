@@ -611,7 +611,10 @@ function PageView(props: {
         if (DRAG_TOOLS.includes(tool)) {
           e.currentTarget.setPointerCapture(e.pointerId);
           setDraft({ x0: p.x, y0: p.y, x: p.x, y: p.y });
-        } else props.onPlace(p.x, p.y);
+        } else {
+          e.preventDefault(); // same reason: keep focus on the text box that placing creates
+          props.onPlace(p.x, p.y);
+        }
       }}
       onPointerMove={(e) => draft && setDraft({ ...draft, ...toPage(e) })}
       onDoubleClick={(e) => {
