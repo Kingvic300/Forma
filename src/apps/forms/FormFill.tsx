@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Linkify } from "../../lib/links";
 import { loadFile, saveFile, type Meta } from "../../lib/store";
 import type { FormData, Question, Response } from "./types";
 
@@ -52,13 +53,13 @@ export function FormView({ id, onSubmit }: { id: string; onSubmit?: (r: Response
     <form onSubmit={submit} className="fill" noValidate>
       <div className="card form-head">
         <h1>{form.title}</h1>
-        {form.description && <p className="pre">{form.description}</p>}
+        {form.description && <p className="pre"><Linkify text={form.description} /></p>}
         {form.questions.some((q) => q.required) && <p className="req-note">* Indicates required question</p>}
       </div>
       {form.questions.map((q) => (
         <div key={q.id} className={"card q" + (errors[q.id] ? " invalid" : "")}>
           <div className="q-title">{q.label || "Untitled question"}{q.required && <span className="req"> *</span>}</div>
-          {q.help && <div className="muted">{q.help}</div>}
+          {q.help && <div className="muted"><Linkify text={q.help} /></div>}
           <Field q={q} value={answers[q.id]} onChange={(v) => set(q, v)} />
           {errors[q.id] && <div className="error">{errors[q.id]}</div>}
         </div>

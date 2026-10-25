@@ -2,6 +2,7 @@ import { askConfirm } from "../../lib/dialog";
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Copy, Plus, Trash2, X } from "lucide-react";
 import Papa from "papaparse";
+import { Linkify } from "../../lib/links";
 import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
 import { createFile, uid } from "../../lib/store";
@@ -165,7 +166,7 @@ function Summary({ q, form }: { q: Question; form: FormData }) {
         </div>
       ) : (
         <ul className="answers">
-          {answers.slice(-50).reverse().map((a, i) => <li key={i}>{[a].flat().join(", ")}</li>)}
+          {answers.slice(-50).reverse().map((a, i) => <li key={i}><Linkify text={[a].flat().join(", ")} /></li>)}
         </ul>
       )}
     </div>
