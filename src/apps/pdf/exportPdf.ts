@@ -119,3 +119,18 @@ export async function buildPdf(data: PdfData): Promise<Uint8Array> {
   }
   return pdf.save();
 }
+
+export async function deletePage(bytes: Uint8Array, index: number) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  if (pdf.getPageCount() <= 1) throw new Error("A PDF needs at least one page");
+  pdf.removePage(index);
+  return pdf.save();
+}
+
+export async function movePage(bytes: Uint8Array, from: number, to: number) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const [page] = await pdf.copyPages(pdf, [from]);
+  pdf.removePage(from);
+  pdf.insertPage(to, page);
+  return pdf.save();
+}
