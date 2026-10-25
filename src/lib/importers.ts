@@ -68,5 +68,19 @@ export async function importFile(file: File): Promise<{ kind: Kind; id: string }
     });
     return { kind: "sheets", id: await createFile("sheets", name, { sheets } satisfies SheetsData) };
   }
+  if (ext === "docx") {
+    const mammoth = await import("mammoth");
+    const res = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+    return { kind: "docs", id: await createFile("docs", name, { html: res.value || "<p><br></p>" }) };
+  }
+  if (ext === "html" || ext === "htm") {
+    const doc = new DOMParser().parseFromString(await file.text(), "text/html");
+    doc.querySelectorAll("script,style,iframe,object").forEach((n) => n.remove());
+    return { kind: "docs", id: await createFile("docs", name, { html: doc.body.innerHTML }) };
+  }
+  if (ext === "txt" || ext === "md") {
+    const html = (await file.text()).split(/\r?\n/).map((l) => `<p>${escapeHtml(l) || "<br>"}</p>`).join("");
+    return { kind: "docs", id: await createFile("docs", name, { html }) };
+  }
   throw new Error(`Unsupported file type: .${ext}`);
 }
