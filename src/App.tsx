@@ -6,7 +6,9 @@ import { DialogHost, errorText, toast } from "./lib/dialog";
 import { ACCEPT, importFile } from "./lib/importers";
 import { isTauri, onFilesOpened, takeLaunchFiles } from "./lib/platform";
 import { APPS, go, switchTo, useRoute, type AppId } from "./lib/route";
+import { getOnlineConfig, type OnlineConfig } from "./lib/online";
 import { getSetting, setSetting, useFiles, type Meta } from "./lib/store";
+import { OnlineSetup } from "./OnlineSetup";
 import { AppIcon, AppSwitcher, Logo, Modal, Spinner } from "./ui";
 import { UpdateBanner, useUpdater } from "./Updater";
 import { FormView } from "./apps/forms/FormFill";
@@ -158,7 +160,7 @@ export default function App() {
             </span>
           )}
           <span className="grow" />
-          <span title="The only network request is the update check against GitHub Releases.">Offline</span>
+          <span title="Forma only goes online to check for updates, and for forms you share as a link.">Offline</span>
           <span>v{pkg.version}</span>
         </footer>
       </div>
@@ -242,9 +244,15 @@ function OpenFiles({ files, current, onClose }: { files: Meta[]; current?: strin
 
 function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<typeof useUpdater> }) {
   const [auto, setAuto] = useState(true);
+  const [online, setOnline] = useState<OnlineConfig | null>(null);
+  const [setup, setSetup] = useState(false);
   useEffect(() => {
     getSetting<boolean>("autoUpdate").then((v) => setAuto(v !== false));
   }, []);
+  useEffect(() => {
+    if (!setup) getOnlineConfig().then((c) => setOnline(c ?? null));
+  }, [setup]);
+  if (setup) return <OnlineSetup onClose={() => setSetup(false)} />;
   const s = updater.state;
   return (
     <Modal title="Settings" onClose={onClose}>
@@ -264,6 +272,13 @@ function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<
           <input type="checkbox" role="switch" checked={auto} disabled={!isTauri} onChange={(e) => { setAuto(e.target.checked); setSetting("autoUpdate", e.target.checked); }} />
           <span />
         </label>
+      </section>
+      <section className="setting">
+        <div>
+          <div className="setting-title">Online forms</div>
+          <div className="muted small">{online ? `Connected to ${new URL(online.url).hostname}` : "Share forms as a link anyone can fill in. Off until you set it up."}</div>
+        </div>
+        <button onClick={() => setSetup(true)}>{online ? "Change" : "Set up"}</button>
       </section>
       {isTauri ? (
         <div className="modal-foot">
