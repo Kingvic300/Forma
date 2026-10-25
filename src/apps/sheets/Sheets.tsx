@@ -27,6 +27,8 @@ export default function Sheets({ id }: { id: string }) {
   const [scroll, setScroll] = useState({ top: 0, height: 600 });
   const history = useRef<{ undo: SheetsData[]; redo: SheetsData[] }>({ undo: [], redo: [] });
   const grid = useRef<HTMLDivElement>(null);
+  const cellInput = useRef<HTMLInputElement | null>(null);
+  const barInput = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
   const sheet: Sheet | undefined = f.data?.sheets[Math.min(active, (f.data?.sheets.length ?? 1) - 1)];
@@ -109,14 +111,34 @@ export default function Sheets({ id }: { id: string }) {
     else if (y + ROW_H * 2 > el.scrollTop + el.clientHeight) el.scrollTop = y + ROW_H * 2 - el.clientHeight;
   }
   function finishEdit(dr = 0, dc = 0) {
-    if (edit) setCells([[sel.r, sel.c, edit.value]]);
+    // Read the text box itself: when typing fast, WebKitGTK can still be delivering the last
+    // keystrokes to state when Enter arrives.
+    const box = edit && (edit.fromBar ? barInput.current : cellInput.current);
+    if (edit) setCells([[sel.r, sel.c, box && box.isConnected ? box.value : edit.value]]);
     setEdit(null);
     if (dr || dc) move(dr, dc);
     grid.current?.focus();
   }
 
   function onKey(e: React.KeyboardEvent) {
-    if (edit) return;
+    if (edit) {
+      // Keys that arrive before the cell's text box has focus (WebKitGTK focuses it a moment
+      // late) would otherwise be lost when typing quickly.
+      if (edit.fromBar || e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); return finishEdit(e.key === "Tab" ? 0 : e.shiftKey ? -1 : 1, e.key === "Tab" ? (e.shiftKey ? -1 : 1) : 0); }
+      if (e.key === "Escape") return setEdit(null);
+      const box = cellInput.current;
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        if (box) box.value = box.value.slice(0, -1);
+        else setEdit((v) => v && { ...v, value: v.value.slice(0, -1) });
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (box) box.value += e.key;
+        else setEdit((v) => v && { ...v, value: v.value + e.key });
+      }
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
@@ -295,6 +317,7 @@ export default function Sheets({ id }: { id: string }) {
         <span className="addr">{colName(range.c1)}{range.r1 + 1}{(range.r1 !== range.r2 || range.c1 !== range.c2) && `:${colName(range.c2)}${range.r2 + 1}`}</span>
         <span className="fx">fx</span>
         <input
+          ref={barInput}
           value={barValue}
           onFocus={() => !edit && setEdit({ value: raw(sel.r, sel.c), fromBar: true })}
           onChange={(e) => setEdit({ value: e.target.value, fromBar: true })}
@@ -364,10 +387,21 @@ export default function Sheets({ id }: { id: string }) {
                   >
                     {isSel && edit && !edit.fromBar ? (
                       <input
-                        autoFocus
+                        ref={(el) => {
+                          cellInput.current = el;
+                          if (el && document.activeElement !== el) {
+                            el.focus();
+                            el.setSelectionRange(el.value.length, el.value.length);
+                          }
+                        }}
                         className="cell-input"
-                        value={edit.value}
-                        onChange={(e) => setEdit({ value: e.target.value, fromBar: false })}
+                        defaultValue={edit.value}
+                        onInput={(e) => {
+                          // Uncontrolled on purpose: re-rendering the grid on every keystroke is slow
+                          // enough in WebKitGTK that fast typing arrives out of order. Mirror to the
+                          // formula bar directly instead.
+                          if (barInput.current) barInput.current.value = e.currentTarget.value;
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") { e.preventDefault(); finishEdit(e.shiftKey ? -1 : 1, 0); }
                           else if (e.key === "Tab") { e.preventDefault(); finishEdit(0, e.shiftKey ? -1 : 1); }
