@@ -76,3 +76,35 @@ export function useUpdater() {
 
   return { state, setState, check, restart };
 }
+
+/** Banner shown once an update has been downloaded. */
+export function UpdateBanner({ updater }: { updater: ReturnType<typeof useUpdater> }) {
+  const { state, setState, restart } = updater;
+  const [dismissed, setDismissed] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  if (state.kind !== "ready" || dismissed) return null;
+  return (
+    <div role="status" className="update-banner">
+      <Download />
+      <span>
+        Forma {state.version} is ready. <span className="muted">Restart to finish updating.</span>
+      </span>
+      <button
+        className="primary"
+        disabled={installing}
+        onClick={async () => {
+          setInstalling(true);
+          try {
+            await restart();
+          } catch (e) {
+            setInstalling(false);
+            setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+          }
+        }}
+      >
+        <RefreshCw /> {installing ? "Installing…" : "Restart now"}
+      </button>
+      <button className="icon" aria-label="Later" onClick={() => setDismissed(true)}><X /></button>
+    </div>
+  );
+}
