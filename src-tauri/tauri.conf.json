@@ -75,6 +75,18 @@
         "installMode": "currentUser"
       }
     },
-    "homepage": "https://github.com/Kingvic300/Forma"
+    "homepage": "https://github.com/Kingvic300/Forma",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFODlGRDUzRDlFMzlBMTEKUldRUm11UFpVLzJKM3JWZUtZUDAxTjFLUTRtUytBYnI3Um9aaUtPY296Z2liZmw3bEMreklicU4K",
+      "endpoints": [
+        "https://github.com/Kingvic300/Forma/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
