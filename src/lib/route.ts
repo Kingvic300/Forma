@@ -11,6 +11,9 @@ export const APPS: { id: AppId; name: string; blurb: string }[] = [
   { id: "tracker", name: "Tracker", blurb: "Tasks, habits and notes" },
 ];
 
+// Last route visited in each app, so switching apps returns to the open file (like Gmail's switcher).
+const last: Partial<Record<AppId, string>> = {};
+
 function parse(hash: string) {
   const [, app = "drive", id, mode] = hash.replace(/^#/, "").split("/");
   const valid = APPS.some((a) => a.id === app);
@@ -25,9 +28,12 @@ export function useRoute() {
     return () => removeEventListener("hashchange", f);
   }, []);
   const r = parse(hash);
+  last[r.app] = hash.replace(/^#/, "") || "/drive";
   return r;
 }
 
 export const go = (path: string) => {
   location.hash = path;
 };
+
+export const switchTo = (app: AppId, current: AppId) => go(app === current ? `/${app}` : last[app] ?? `/${app}`);
