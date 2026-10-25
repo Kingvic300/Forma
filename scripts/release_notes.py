@@ -34,6 +34,8 @@ def main(tag: str) -> None:
     lines = [
         f"## Download Forma {tag.lstrip('v')}",
         "",
+        "Easiest: use the [download page](https://kingvic300.github.io/Forma/), which picks the right file for your computer.",
+        "",
         "| System | For | File | How to install |",
         "| --- | --- | --- | --- |",
     ]

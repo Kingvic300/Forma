@@ -17,7 +17,7 @@ against this repository's GitHub Releases.
 
 ## Installing
 
-Download the file for your system from the [latest release](https://github.com/Kingvic300/Forma/releases/latest):
+Get it from the [download page](https://kingvic300.github.io/Forma/), which picks the right installer for your computer, or from the [latest release](https://github.com/Kingvic300/Forma/releases/latest):
 
 - **Linux**: `.deb` (`sudo apt install ./Forma_*.deb`), `.AppImage` (`chmod +x`, then run) or `.rpm`
 - **macOS**: `.dmg`. The builds are not notarized yet: on first launch, right-click the app and choose **Open**.
