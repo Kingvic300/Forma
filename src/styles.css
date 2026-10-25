@@ -72,3 +72,37 @@ input, textarea, [contenteditable], .selectable { user-select: text; }
 @keyframes shimmer { from { background-position: -200px 0; } to { background-position: 200px 0; } }
 .spin { animation: spin 0.9s linear infinite; }
 .pop { animation: pop-in 140ms var(--ease); transform-origin: top; }
+
+/* Controls */
+button, input, select, textarea { font: inherit; color: inherit; }
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+}
+button svg { width: 15px; height: 15px; flex: none; stroke-width: 1.8; }
+button:hover:not(:disabled) { background: #1f1f1f; border-color: #444444; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [contenteditable]:focus-visible { outline: none; box-shadow: var(--ring); }
+button:disabled { opacity: 0.4; cursor: default; }
+button.primary { background: var(--cyan); border-color: transparent; color: var(--cyan-ink); box-shadow: none; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--cyan-hover); border-color: transparent; }
+button.danger { background: var(--danger-solid); border-color: transparent; color: #fff; box-shadow: none; font-weight: 600; }
+button.danger:hover:not(:disabled) { background: #e5525c; border-color: transparent; }
+button.on { background: var(--cyan-soft); border-color: transparent; color: var(--cyan); box-shadow: none; }
+button.icon { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-3); padding: 0 6px; }
+button.icon:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
+button.icon.round { width: 30px; padding: 0; }
+button.link { background: none; border: 0; box-shadow: none; height: auto; padding: 0; color: var(--cyan); }
+button.link:hover:not(:disabled) { background: none; text-decoration: underline; text-underline-offset: 3px; }
