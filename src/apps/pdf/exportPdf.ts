@@ -134,3 +134,19 @@ export async function movePage(bytes: Uint8Array, from: number, to: number) {
   pdf.insertPage(to, page);
   return pdf.save();
 }
+
+export async function appendPdf(bytes: Uint8Array, other: Uint8Array) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const src = await PDFDocument.load(other, { ignoreEncryption: true });
+  const pages = await pdf.copyPages(src, src.getPageIndices());
+  pages.forEach((p) => pdf.addPage(p));
+  return pdf.save();
+}
+
+export async function insertBlankPage(bytes: Uint8Array, at: number) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const ref = pdf.getPage(Math.min(at, pdf.getPageCount() - 1));
+  const { width, height } = ref.getSize();
+  pdf.insertPage(at, [width, height]);
+  return pdf.save();
+}
