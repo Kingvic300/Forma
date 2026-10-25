@@ -1,4 +1,4 @@
-export type AnnType = "text" | "image" | "highlight" | "whiteout" | "rect" | "check" | "cross" | "line";
+export type AnnType = "text" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "check" | "cross" | "line";
 export type Font = "helv" | "times" | "courier";
 
 /** An annotation placed on a page. Coordinates are PDF points from the page's top-left. */

@@ -1,4 +1,4 @@
-import { PDFCheckBox, PDFDocument, PDFDropdown, PDFRadioGroup, PDFTextField, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, StandardFonts, rgb, type PDFFont, type PDFObject } from "pdf-lib";
 import type { Ann, Font, PdfData } from "./types";
 
 const hex = (h = "#000000") => {
@@ -38,9 +38,14 @@ export async function readFields(bytes: Uint8Array): Promise<FieldInfo[]> {
   }
 }
 
-/** Burn annotations and form values into a new PDF. */
-export async function buildPdf(data: PdfData): Promise<Uint8Array> {
-  const pdf = await PDFDocument.load(data.bytes, { ignoreEncryption: true });
+export type Box = { x: number; y: number; w: number; h: number };
+
+/** Draws one page (with its form values) to a PNG and paints the boxes black. Supplied by the UI. */
+export type Rasterize = (bytes: Uint8Array, page: number, boxes: Box[]) => Promise<{ png: Uint8Array; width: number; height: number }>;
+
+/** Burn annotations and form values into a new PDF. Redactions need a page renderer. */
+export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Uint8Array> {
+  let pdf = await PDFDocument.load(data.bytes, { ignoreEncryption: true });
 
   if (Object.keys(data.fields).length) {
     const form = pdf.getForm();
@@ -55,6 +60,12 @@ export async function buildPdf(data: PdfData): Promise<Uint8Array> {
         // A field that can't take the value is left as it was.
       }
     }
+  }
+
+  const redactions = data.anns.filter((a) => a.type === "redact");
+  if (redactions.length) {
+    if (!rasterize) throw new Error("Redaction needs a page renderer");
+    pdf = await applyRedactions(pdf, redactions, rasterize);
   }
 
   const fonts = new Map<string, PDFFont>();
@@ -117,7 +128,63 @@ export async function buildPdf(data: PdfData): Promise<Uint8Array> {
       page.drawImage(img, { x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h });
     }
   }
+  // Redacted pages leave their old content behind as unreferenced objects; make sure none is written.
+  if (redactions.length) dropUnreferenced(pdf);
   return pdf.save();
+}
+
+/**
+ * Replace every page that has redaction boxes with an image of that page with the boxes burned
+ * in. Nothing under a box survives: the page's text, images, links and form fields go, and so
+ * does every object that is no longer referenced (pdf-lib would otherwise still write them).
+ */
+async function applyRedactions(pdf: PDFDocument, boxes: Ann[], rasterize: Rasterize) {
+  const filled = await pdf.save(); // includes form values, so they show in the page images
+  const out = await PDFDocument.load(filled, { ignoreEncryption: true });
+  const form = out.getForm();
+  for (const index of [...new Set(boxes.map((b) => b.page))].sort((a, b) => a - b)) {
+    const old = out.getPage(index);
+    if (!old) continue;
+    const image = await rasterize(filled, index, boxes.filter((b) => b.page === index));
+    const onPage = new Set(old.node.Annots()?.asArray() ?? []);
+    for (const field of form.getFields()) {
+      const widgets = field.acroField.getWidgets();
+      if (widgets.some((w) => w.P() === old.ref || onPage.has(out.context.getObjectRef(w.dict)!))) {
+        try {
+          form.removeField(field);
+        } catch {
+          // A field whose widgets can't be located is dropped by the clean-up below.
+        }
+      }
+    }
+    const png = await out.embedPng(image.png);
+    out.removePage(index);
+    out.insertPage(index, [image.width, image.height]).drawImage(png, { x: 0, y: 0, width: image.width, height: image.height });
+  }
+  return out;
+}
+
+/**
+ * Delete every indirect object that can't be reached from the document catalog or info dict.
+ * Run it last: pdf-lib caches shared objects (such as the q/Q streams it wraps page content in)
+ * that only become referenced when something is drawn.
+ */
+function dropUnreferenced(doc: PDFDocument) {
+  const ctx = doc.context;
+  const seen = new Set<PDFRef>();
+  const stack: (PDFObject | undefined)[] = [ctx.trailerInfo.Root, ctx.trailerInfo.Info, ctx.trailerInfo.Encrypt];
+  while (stack.length) {
+    let o = stack.pop();
+    if (o instanceof PDFRef) {
+      if (seen.has(o)) continue;
+      seen.add(o);
+      o = ctx.lookup(o);
+    }
+    if (o instanceof PDFDict) for (const [, v] of o.entries()) stack.push(v);
+    else if (o instanceof PDFArray) stack.push(...o.asArray());
+    else if (o instanceof PDFStream) for (const [, v] of o.dict.entries()) stack.push(v);
+  }
+  for (const [ref] of ctx.enumerateIndirectObjects()) if (!seen.has(ref)) ctx.delete(ref);
 }
 
 export async function deletePage(bytes: Uint8Array, index: number) {
