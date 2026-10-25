@@ -56,8 +56,26 @@ fn take_opened_files(state: tauri::State<Opened>) -> Vec<OpenedFile> {
         .collect()
 }
 
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        // A second launch (e.g. double-clicking a PDF) focuses the running window instead.
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            show_main(app);
+            queue(app, file_args(args));
+        }));
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
 
     let app = builder
         .plugin(tauri_plugin_dialog::init())
