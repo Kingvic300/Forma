@@ -1,9 +1,10 @@
-import { askConfirm, errorText, toast } from "../../lib/dialog";
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Signature, Square, Trash2, Type, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { askConfirm, errorText, toast } from "../../lib/dialog";
+import { findLinks, isSafeHref, openLink } from "../../lib/links";
 import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
 import { uid } from "../../lib/store";
@@ -13,6 +14,34 @@ import { imageToPng, SignaturePad } from "./SignaturePad";
 import { CSS_FONT, type Ann, type Font, type PdfData } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+type PageLink = { x: number; y: number; w: number; h: number; href: string };
+
+/** Clickable areas on a page: the PDF's own link annotations, plus addresses written as plain text. */
+async function pageLinks(doc: PDFDocumentProxy, index: number): Promise<PageLink[]> {
+  const page = await doc.getPage(index + 1);
+  const vp = page.getViewport({ scale: 1 });
+  const out: PageLink[] = [];
+  const rect = (r: number[]) => {
+    const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r);
+    return { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) };
+  };
+  for (const a of await page.getAnnotations()) {
+    if (a.subtype === "Link" && typeof a.url === "string" && isSafeHref(a.url)) out.push({ ...rect(a.rect), href: a.url });
+  }
+  const known = new Set(out.map((l) => l.href));
+  for (const item of (await page.getTextContent()).items) {
+    if (!("str" in item) || !item.str) continue;
+    for (const l of findLinks(item.str)) {
+      if (known.has(l.href)) continue;
+      const m = pdfjs.Util.transform(vp.transform, item.transform);
+      const size = Math.hypot(m[2], m[3]);
+      const perChar = item.width / item.str.length;
+      out.push({ x: m[4] + l.index * perChar, y: m[5] - size, w: l.text.length * perChar, h: size * 1.2, href: l.href });
+    }
+  }
+  return out;
+}
 
 type Tool = "select" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "rect" | "line" | "check" | "cross";
 const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "rect", "line"];
@@ -311,6 +340,16 @@ function PageView(props: {
   const wrap = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [draft, setDraft] = useState<{ x0: number; y0: number; x: number; y: number } | null>(null);
+  const [links, setLinks] = useState<PageLink[]>([]);
+
+  useEffect(() => {
+    if (!visible) return;
+    let alive = true;
+    pageLinks(doc, index).then((l) => alive && setLinks(l)).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [doc, index, visible]);
 
   useEffect(() => {
     const io = new IntersectionObserver(([e]) => e.isIntersecting && setVisible(true), { rootMargin: "800px" });
@@ -376,6 +415,20 @@ function PageView(props: {
           style={{ left: Math.min(draft.x0, draft.x) * scale, top: Math.min(draft.y0, draft.y) * scale, width: Math.abs(draft.x - draft.x0) * scale, height: tool === "line" ? 2 : Math.abs(draft.y - draft.y0) * scale }}
         />
       )}
+      {tool === "select" &&
+        links.map((l, i) => (
+          <a
+            key={i}
+            className="pdf-link"
+            href={l.href}
+            title={`${l.href.replace(/^mailto:/, "")}  (click to open)`}
+            style={{ left: l.x * scale, top: l.y * scale, width: Math.max(l.w * scale, 8), height: Math.max(l.h * scale, 8) }}
+            onClick={(e) => {
+              e.preventDefault();
+              openLink(l.href);
+            }}
+          />
+        ))}
       {props.anns.map((a) => (
         <AnnView key={a.id} a={a} scale={scale} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} />
       ))}

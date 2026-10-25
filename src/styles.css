@@ -478,6 +478,9 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .page { position: relative; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 18px 50px -12px rgba(0, 0, 0, 0.6); touch-action: none; }
 .page canvas { display: block; pointer-events: none; }
 .page.placing { cursor: crosshair; }
+.pdf-link { position: absolute; border-radius: 2px; cursor: pointer; }
+.pdf-link:hover { background: rgba(8, 145, 178, 0.14); box-shadow: inset 0 -2px 0 rgba(8, 145, 178, 0.7); }
+.pdf-link:focus-visible { box-shadow: 0 0 0 2px #0891b2; }
 .draft { position: absolute; pointer-events: none; border: 1px dashed #0e7490; }
 .draft.highlight { background: rgba(255, 221, 51, 0.45); }
 .draft.whiteout { background: #fff; border-color: #94a3b8; }
