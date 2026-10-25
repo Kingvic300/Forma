@@ -95,5 +95,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Forma");
 
-    app.run(|_app, _event| {});
+    app.run(|_app, _event| {
+        // macOS delivers "Open with" files as an event rather than as arguments.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = &_event {
+            let paths = urls.iter().filter_map(|u| u.to_file_path().ok()).collect();
+            queue(_app, paths);
+        }
+    });
 }
