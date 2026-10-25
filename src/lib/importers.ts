@@ -82,5 +82,10 @@ export async function importFile(file: File): Promise<{ kind: Kind; id: string }
     const html = (await file.text()).split(/\r?\n/).map((l) => `<p>${escapeHtml(l) || "<br>"}</p>`).join("");
     return { kind: "docs", id: await createFile("docs", name, { html }) };
   }
+  if (ext === "json") {
+    const form = JSON.parse(await file.text()) as FormData;
+    if (!Array.isArray(form.questions)) throw new Error("Not a Forma form file");
+    return { kind: "forms", id: await createFile("forms", form.title || name, { ...form, responses: form.responses ?? [] }) };
+  }
   throw new Error(`Unsupported file type: .${ext}`);
 }
