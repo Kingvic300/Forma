@@ -288,7 +288,7 @@ export default function Sheets({ id }: { id: string }) {
         <span className="sep" />
         <input className="filter" placeholder="Filter rows…" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <span className="sep" />
-        <button onClick={() => importRef.current?.click()}>Import CSV/XLSX as tab</button>
+        <button onClick={() => importRef.current?.click()} title="Each sheet in the file becomes a new tab here">Add a CSV or Excel file</button>
         <input ref={importRef} type="file" hidden accept=".csv,.tsv,.xlsx,.xls,.ods" onChange={(e) => { const file = e.target.files?.[0]; if (file) importInto(file).catch((err) => toast(`Couldn’t import ${file.name}: ${errorText(err)}`, "error")); e.target.value = ""; }} />
       </div>
       <div className="formula-bar">

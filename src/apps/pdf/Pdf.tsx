@@ -57,7 +57,7 @@ const TOOLS: [Tool, typeof Type, string][] = [
   ["image", ImageIcon, "Image"],
   ["highlight", Highlighter, "Highlight (drag)"],
   ["whiteout", Eraser, "White-out (drag)"],
-  ["redact", EyeOff, "Redact (drag)"],
+  ["redact", EyeOff, "Black out (drag)"],
   ["rect", Square, "Box (drag)"],
   ["line", Minus, "Line (drag)"],
 ];
@@ -187,18 +187,19 @@ export default function Pdf({ id }: { id: string }) {
     pageOp("Adding page…", () => insertBlankPage(data.bytes, i + 1), (anns) => anns.map((a) => (a.page > i ? { ...a, page: a.page + 1 } : a)));
 
   async function download() {
-    const redacted = new Set(data.anns.filter((a) => a.type === "redact").map((a) => a.page)).size;
+    const blackedOut = new Set(data.anns.filter((a) => a.type === "redact").map((a) => a.page)).size;
+    const one = blackedOut === 1;
     if (
-      redacted &&
-      !(await askConfirm("Download with redactions?", {
-        body: `Everything under the black boxes is permanently removed from the downloaded copy. The ${redacted === 1 ? "redacted page is" : `${redacted} redacted pages are`} saved as ${redacted === 1 ? "an image" : "images"}, so ${redacted === 1 ? "its" : "their"} text can't be selected or searched. The boxes stay editable here in Forma.`,
-        confirmLabel: "Redact and download",
+      blackedOut &&
+      !(await askConfirm("Download with blacked-out parts?", {
+        body: `Anything under the black boxes will be gone for good from the file you download. To make sure of that, ${one ? "the page with black boxes is" : `the ${blackedOut} pages with black boxes are`} saved as ${one ? "a picture" : "pictures"}, so ${one ? "its" : "their"} words can't be copied or searched. You can still change the boxes here in Forma.`,
+        confirmLabel: "Black out and download",
       }))
     )
       return;
-    setBusy(redacted ? "Redacting…" : "Building PDF…");
+    setBusy(blackedOut ? "Blacking out…" : "Building PDF…");
     try {
-      await saveAs(`${safeName(f.meta!.name)}${redacted ? " (redacted)" : ""}.pdf`, await buildPdf(data, rasterizePage));
+      await saveAs(`${safeName(f.meta!.name)}${blackedOut ? " (blacked out)" : ""}.pdf`, await buildPdf(data, rasterizePage));
     } catch (e) {
       toast(`Couldn’t build the PDF: ${errorText(e)}`, "error");
     } finally {
@@ -213,7 +214,7 @@ export default function Pdf({ id }: { id: string }) {
     <div className="app-page pdf">
       <TitleBar meta={f.meta} onRename={f.rename} saved={f.saved} app="pdf">
         {busy && <span className="muted">{busy}</span>}
-        <button onClick={() => mergeInput.current?.click()}>Merge PDF…</button>
+        <button onClick={() => mergeInput.current?.click()} title="Add all pages of another PDF to the end of this one">Add pages from a PDF…</button>
         <button className="primary" onClick={download} disabled={!!busy}>Download PDF</button>
       </TitleBar>
       <div className="toolbar pdf-tools">
@@ -253,8 +254,10 @@ export default function Pdf({ id }: { id: string }) {
       {tool !== "select" && (
         <div className="hint-bar">
           {tool === "redact"
-            ? "Drag over anything that must be removed. It’s deleted from the downloaded PDF, not just covered."
-            : DRAG_TOOLS.includes(tool)
+            ? "Drag over anything you want gone for good. It’s deleted from the file you download, not just hidden."
+            : tool === "whiteout"
+              ? "Drag over text to hide it under white. The old words are still in the file underneath; use Black out to remove them for good."
+              : DRAG_TOOLS.includes(tool)
               ? "Drag on the page to draw."
               : pending
                 ? "Click where it should go."
