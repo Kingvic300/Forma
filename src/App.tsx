@@ -1,12 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronsUpDown, Download, FolderOpen, Search, Settings } from "lucide-react";
+import { ChevronsUpDown, Download, FolderOpen, Search, Settings, X } from "lucide-react";
 import Home from "./Home";
 import { CommandPalette } from "./CommandPalette";
 import { DialogHost, errorText, toast } from "./lib/dialog";
 import { ACCEPT, importFile } from "./lib/importers";
 import { isTauri, onFilesOpened, takeLaunchFiles } from "./lib/platform";
 import { APPS, go, switchTo, useRoute, type AppId } from "./lib/route";
-import { getSetting, setSetting, useFiles } from "./lib/store";
+import { getSetting, setSetting, useFiles, type Meta } from "./lib/store";
 import { AppIcon, AppSwitcher, Logo, Modal, Spinner } from "./ui";
 import { UpdateBanner, useUpdater } from "./Updater";
 import { FormView } from "./apps/forms/FormFill";
@@ -26,6 +26,7 @@ export default function App() {
   const updater = useUpdater();
   const fileInput = useRef<HTMLInputElement>(null);
   const info = APPS.find((a) => a.id === app)!;
+  const tabs = useOpenFiles(id, app);
 
   const openFiles = useCallback(async (list: File[]) => {
     let last: { kind: string; id: string } | null = null;
@@ -55,11 +56,14 @@ export default function App() {
       } else if (k === ",") {
         e.preventDefault();
         setAbout(true);
+      } else if (k === "w" && !e.shiftKey && id) {
+        e.preventDefault();
+        tabs.close(id);
       }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [app]);
+  });
 
   // Files opened from the OS ("Open with Forma", double-click, command line).
   useEffect(() => {
@@ -111,7 +115,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <Recent current={id} />
+        <OpenFiles files={tabs.open} current={id} onClose={tabs.close} />
         <div className="sb-foot">
           <button className="sb-item" onClick={() => fileInput.current?.click()}>
             <FolderOpen />
@@ -174,17 +178,63 @@ export default function App() {
   );
 }
 
-function Recent({ current }: { current?: string }) {
+const OPEN_KEY = "forma:open-files";
+
+/** Files opened in this window, like editor tabs. Remembered per computer; closing never deletes. */
+function useOpenFiles(current: string | undefined, app: AppId) {
   const files = useFiles();
-  if (!files?.length) return null;
+  const [ids, setIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]");
+    } catch {
+      return [];
+    }
+  });
+  const byId = new Map((files ?? []).map((f) => [f.id, f]));
+
+  useEffect(() => {
+    if (current) setIds((l) => (l.includes(current) ? l : [...l, current]));
+  }, [current]);
+  // Forget files that were deleted.
+  useEffect(() => {
+    if (files) setIds((l) => (l.every((i) => byId.has(i)) ? l : l.filter((i) => byId.has(i))));
+  }, [files]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify(ids));
+    } catch {
+      // Storage can be unavailable; the list then lasts until the window closes.
+    }
+  }, [ids]);
+
+  const open = ids.map((i) => byId.get(i)).filter((f): f is Meta => !!f);
+  const close = (fid: string) => {
+    const at = open.findIndex((f) => f.id === fid);
+    const rest = open.filter((f) => f.id !== fid);
+    setIds(rest.map((f) => f.id));
+    if (fid === current) {
+      const next = rest[Math.min(at, rest.length - 1)];
+      go(next ? `/${next.kind}/${next.id}` : `/${app}`);
+    }
+  };
+  return { open, close };
+}
+
+function OpenFiles({ files, current, onClose }: { files: Meta[]; current?: string; onClose: (id: string) => void }) {
   return (
     <div className="sb-recent">
-      <div className="sb-heading">Recent</div>
-      {files.slice(0, 8).map((f) => (
-        <button key={f.id} className={"sb-file" + (f.id === current ? " on" : "")} onClick={() => go(`/${f.kind}/${f.id}`)} title={f.name}>
-          <AppIcon app={f.kind as AppId} size={16} />
-          <span>{f.name || "Untitled"}</span>
-        </button>
+      <div className="sb-heading">Open</div>
+      {!files.length && <p className="sb-empty">Files you open appear here.</p>}
+      {files.map((f) => (
+        <div key={f.id} className={"sb-file" + (f.id === current ? " on" : "")}>
+          <button className="sb-file-open" onClick={() => go(`/${f.kind}/${f.id}`)} title={f.name}>
+            <AppIcon app={f.kind as AppId} size={16} />
+            <span>{f.name || "Untitled"}</span>
+          </button>
+          <button className="sb-close" title={f.id === current ? "Close (Ctrl+W)" : "Close"} aria-label={`Close ${f.name || "Untitled"}`} onClick={() => onClose(f.id)}>
+            <X />
+          </button>
+        </div>
       ))}
     </div>
   );

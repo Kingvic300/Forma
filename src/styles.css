@@ -167,10 +167,17 @@ select option { background: var(--raised); color: var(--text); }
 .sb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); }
 .sb-recent { flex: 1; min-height: 0; overflow: auto; margin-top: 18px; }
 .sb-heading { padding: 0 8px 6px; font-size: 11.5px; font-weight: 600; color: var(--text-3); }
-.sb-file { width: 100%; height: 28px; justify-content: flex-start; gap: 9px; padding: 0 8px 0 10px; background: transparent; border-color: transparent; box-shadow: none; color: var(--text-2); font-weight: 450; border-radius: 6px; }
-.sb-file:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
-.sb-file.on, .sb-file.on:hover:not(:disabled) { background: var(--active); color: var(--text); }
-.sb-file span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.sb-file { display: flex; align-items: center; height: 28px; border-radius: 6px; color: var(--text-2); }
+.sb-file:hover { background: var(--hover); color: var(--text); }
+.sb-file.on { background: var(--active); color: var(--text); }
+.sb-file-open { flex: 1; min-width: 0; height: 28px; justify-content: flex-start; gap: 9px; padding: 0 4px 0 10px; background: transparent; border-color: transparent; box-shadow: none; color: inherit; font-weight: 450; }
+.sb-file-open:hover:not(:disabled) { background: transparent; border-color: transparent; }
+.sb-file-open span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.sb-close { width: 22px; height: 22px; margin-right: 3px; padding: 0; flex: none; background: transparent; border-color: transparent; box-shadow: none; color: var(--text-3); border-radius: 5px; opacity: 0; }
+.sb-close svg { width: 13px; height: 13px; }
+.sb-file:hover .sb-close, .sb-file.on .sb-close, .sb-close:focus-visible { opacity: 1; }
+.sb-close:hover:not(:disabled) { background: var(--active); border-color: transparent; color: var(--text); }
+.sb-empty { margin: 0; padding: 2px 10px; font-size: 12px; color: var(--text-3); }
 .sb-foot { display: flex; flex-direction: column; gap: 1px; padding-top: 8px; margin-top: auto; border-top: 1px solid var(--chrome-line); }
 .sb-recent + .sb-foot { margin-top: 8px; }
 .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
