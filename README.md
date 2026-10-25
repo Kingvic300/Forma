@@ -36,3 +36,16 @@ npm install
 npm run tauri dev        # desktop app with hot reload
 npm run tauri build      # installers in src-tauri/target/release/bundle/
 ```
+
+## Releasing
+
+1. One-time: add two repository secrets (Settings → Secrets and variables → Actions):
+   - `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/forma.key`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the key's password (empty for the generated key)
+
+   Keep `~/.tauri/forma.key` backed up. Without it, installed copies can't receive updates.
+2. Run `scripts/bump.sh 0.2.0`. It sets the version in `package.json`, `Cargo.toml` and
+   `tauri.conf.json`, commits, tags `v0.2.0` and pushes.
+3. The **Release** workflow builds Linux, macOS (Apple silicon and Intel) and Windows installers,
+   signs the update packages, and publishes them with `latest.json`. Installed copies pick it up
+   within six hours, or immediately from **Settings → Check for updates**.
