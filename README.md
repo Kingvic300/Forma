@@ -49,3 +49,12 @@ npm run tauri build      # installers in src-tauri/target/release/bundle/
 3. The **Release** workflow builds Linux, macOS (Apple silicon and Intel) and Windows installers,
    signs the update packages, and publishes them with `latest.json`. Installed copies pick it up
    within six hours, or immediately from **Settings → Check for updates**.
+
+## Contributing
+
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first; it
+covers setup, the ground rules for staying offline, and the design system.
+
+## License
+
+Forma is released under the [MIT License](LICENSE).
