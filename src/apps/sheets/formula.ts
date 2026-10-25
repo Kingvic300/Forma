@@ -142,3 +142,35 @@ function parse(src: string): Node {
   if (p < toks.length) throw new FErr("#ERROR!");
   return root;
 }
+
+const num = (v: Val): number => {
+  if (typeof v === "number") return v;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (v.trim() === "") return 0;
+  const n = Number(v);
+  if (isNaN(n)) throw new FErr("#VALUE!");
+  return n;
+};
+const str = (v: Val) => (typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : String(v));
+const truthy = (v: Val) => (typeof v === "string" ? v !== "" && v.toUpperCase() !== "FALSE" : !!num(v));
+const nums = (vs: Val[]) => vs.filter((v): v is number => typeof v === "number");
+
+function criteria(c: Val): (v: Val) => boolean {
+  const m = /^(<=|>=|<>|<|>|=)?(.*)$/.exec(str(c))!;
+  const op = m[1] ?? "=";
+  const target = m[2];
+  const tn = Number(target);
+  return (v) => {
+    const isNum = target !== "" && !isNaN(tn) && typeof v !== "string";
+    const a = isNum ? num(v) : str(v).toLowerCase();
+    const b = isNum ? tn : target.toLowerCase();
+    switch (op) {
+      case "<": return a < b;
+      case ">": return a > b;
+      case "<=": return a <= b;
+      case ">=": return a >= b;
+      case "<>": return a !== b;
+      default: return a === b;
+    }
+  };
+}
