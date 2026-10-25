@@ -1,19 +1,15 @@
-import { PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, StandardFonts, rgb, type PDFFont, type PDFObject } from "pdf-lib";
-import type { Ann, Font, PdfData } from "./types";
+import fontkit from "@pdf-lib/fontkit";
+import { PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
+import { fontBytes } from "./fonts";
+import type { Ann, Font, PdfData, Span } from "./types";
 
 const hex = (h = "#000000") => {
   const n = parseInt(h.slice(1), 16);
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 };
 
-// The standard PDF fonts only cover Latin-1.
-const latin1 = (s: string) => s.replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
-
-const FONT: Record<Font, [StandardFonts, StandardFonts]> = {
-  helv: [StandardFonts.Helvetica, StandardFonts.HelveticaBold],
-  times: [StandardFonts.TimesRoman, StandardFonts.TimesRomanBold],
-  courier: [StandardFonts.Courier, StandardFonts.CourierBold],
-};
+/** Lines of the annotation as weighted pieces. */
+const linesOf = (a: Ann): Span[][] => a.spans ?? (a.text ?? "").split("\n").map((t) => [{ t, b: a.bold }]);
 
 export interface FieldInfo {
   name: string;
@@ -68,10 +64,14 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
     pdf = await applyRedactions(pdf, redactions, rasterize);
   }
 
+  pdf.registerFontkit(fontkit);
   const fonts = new Map<string, PDFFont>();
   const font = async (f: Font = "helv", bold = false) => {
     const k = f + bold;
-    if (!fonts.has(k)) fonts.set(k, await pdf.embedFont(FONT[f][bold ? 1 : 0]));
+    if (!fonts.has(k)) fonts.set(k, await pdf.embedFont(await fontBytes(f, bold), {
+          // Full font (pdf-lib subsetting drops glyphs) and no ligatures (pdf-lib mis-spaces them).
+          features: { liga: false, clig: false, dlig: false, calt: false },
+        }));
     return fonts.get(k)!;
   };
   const images = new Map<string, Awaited<ReturnType<PDFDocument["embedPng"]>>>();
@@ -86,10 +86,22 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
 
     async function drawText(a: Ann) {
       const size = a.size ?? 14;
-      const f = await font(a.font, a.bold);
-      (a.text ?? "").split("\n").forEach((line, i) => {
-        page.drawText(latin1(line), { x: X(a.x), y: Y(a.y + i * size * 1.2 + size * 0.93), size, font: f, color: hex(a.color) });
-      });
+      const bl = a.bl ?? size * 0.93;
+      const lead = a.lead ?? size * 1.2;
+      const lines = linesOf(a);
+      for (let i = 0; i < lines.length; i++) {
+        let x = X(a.x);
+        for (const span of lines[i]) {
+          if (!span.t) continue;
+          const f = await font(a.font, !!span.b);
+          // Leading spaces are dropped by drawText, so step over them explicitly.
+          const lead0 = span.t.match(/^\s*/)![0];
+          x += f.widthOfTextAtSize(lead0, size);
+          const t = span.t.slice(lead0.length);
+          if (t) page.drawText(t, { x, y: Y(a.y + bl + i * lead), size, font: f, color: hex(a.color) });
+          x += f.widthOfTextAtSize(t, size);
+        }
+      }
     }
     function draw(a: Ann) {
       switch (a.type) {
