@@ -9,6 +9,7 @@ import { isTauri } from "./lib/platform";
 import { getSetting } from "./lib/store";
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const RETRY_AFTER_FAILURE_MS = 10 * 60 * 1000; // GitHub can be unreachable on patchy connections
 
 export type UpdateState =
   | { kind: "idle" }
@@ -23,8 +24,9 @@ export function useUpdater() {
   const busy = useRef(false);
   const pending = useRef<{ install: () => Promise<void> } | null>(null);
 
+  /** Returns false when the check couldn't complete, so the caller can retry sooner. */
   const check = useCallback(async (manual = false) => {
-    if (!isTauri || busy.current || pending.current) return;
+    if (!isTauri || busy.current || pending.current) return true;
     busy.current = true;
     if (manual) setState({ kind: "checking" });
     try {
@@ -32,7 +34,7 @@ export function useUpdater() {
       const update = await check();
       if (!update) {
         if (manual) setState({ kind: "latest" });
-        return;
+        return true;
       }
       let total = 0;
       let done = 0;
@@ -46,8 +48,10 @@ export function useUpdater() {
       });
       pending.current = update;
       setState({ kind: "ready", version: update.version, notes: update.body });
+      return true;
     } catch (e) {
       setState(manual ? { kind: "error", message: e instanceof Error ? e.message : String(e) } : { kind: "idle" });
+      return false;
     } finally {
       busy.current = false;
     }
@@ -63,15 +67,13 @@ export function useUpdater() {
   useEffect(() => {
     if (!isTauri) return;
     let timer: number | undefined;
-    const first = window.setTimeout(async () => {
+    const run = async () => {
       if ((await getSetting<boolean>("autoUpdate")) === false) return;
-      check();
-      timer = window.setInterval(() => check(), CHECK_EVERY_MS);
-    }, 15_000); // let the app settle first
-    return () => {
-      clearTimeout(first);
-      clearInterval(timer);
+      const ok = await check();
+      timer = window.setTimeout(run, ok ? CHECK_EVERY_MS : RETRY_AFTER_FAILURE_MS);
     };
+    timer = window.setTimeout(run, 15_000); // let the app settle first
+    return () => clearTimeout(timer);
   }, [check]);
 
   return { state, setState, check, restart };
