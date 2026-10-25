@@ -354,3 +354,27 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; background
 .formula-bar input:hover { border-color: var(--line); }
 .formula-bar input:focus { background: var(--well); }
 .toolbar .filter { width: 180px; height: 26px; margin-left: 2px; }
+.grid { flex: 1; overflow: auto; position: relative; outline: none; background: #030303; user-select: none; }
+.grid:focus-visible { box-shadow: inset 0 0 0 1px rgba(60, 200, 220, 0.4); }
+.grid-head { position: sticky; top: 0; z-index: 3; display: flex; height: 26px; background: #0c0c0c; }
+.corner { position: sticky; left: 0; z-index: 4; flex: none; background: #0c0c0c; border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); cursor: pointer; }
+.col-head, .row-head { flex: none; display: grid; place-items: center; font: 500 11px var(--sans); color: var(--text-3); border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line); cursor: pointer; }
+.col-head:hover, .row-head:hover { color: var(--text-2); }
+.col-head.on, .row-head.on { background: rgba(60, 200, 220, 0.1); color: var(--cyan); }
+.grid-row { position: absolute; left: 0; display: flex; }
+.row-head { position: sticky; left: 0; z-index: 2; background: #0c0c0c; border-right-color: var(--line-strong); border-bottom-color: var(--line-soft); }
+.cell { flex: none; position: relative; height: 100%; padding: 0 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-right: 1px solid #171717; border-bottom: 1px solid #171717; font-size: 12.5px; line-height: 25px; color: var(--text); }
+.cell.num { text-align: right; font: 12px/25px var(--mono); }
+.cell.err { color: var(--danger); font: 500 11.5px/25px var(--mono); }
+.cell.hdr { background: #0e0e0e; font-weight: 600; }
+.cell.in { background: rgba(60, 200, 220, 0.09); }
+.cell.sel { z-index: 1; overflow: visible; outline: 2px solid var(--cyan); outline-offset: -2px; }
+.cell-input { position: absolute; inset: -1px; width: 260px; min-width: calc(100% + 2px); height: calc(100% + 2px); padding: 0 6px; border: 2px solid var(--cyan); border-radius: 0; background: var(--well); font-size: 12.5px; box-shadow: var(--pop); }
+.cell-input:focus { border-color: var(--cyan); box-shadow: var(--pop); }
+.sheet-tabs { display: flex; align-items: center; gap: 2px; height: 34px; flex: none; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line-soft); }
+.sheet-tabs .tab { height: 26px; padding: 0 12px; background: transparent; border-color: transparent; box-shadow: none; color: var(--text-2); }
+.sheet-tabs .tab:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
+.sheet-tabs .tab.on, .sheet-tabs .tab.on:hover:not(:disabled) { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px var(--line-strong); }
+.sheet-tabs .add { width: 28px; padding: 0; background: transparent; border-color: transparent; box-shadow: none; color: var(--text-3); font-size: 16px; }
+.stats { margin-left: 14px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.stats b { color: var(--text-2); font-weight: 600; }
