@@ -44,8 +44,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ## Ground rules
 
-- **Stay offline.** Don't add network requests, analytics or remote fonts. The only network
-  call Forma makes is the update check against GitHub Releases.
+- **Stay offline by default.** Don't add analytics, remote fonts or new network requests. Forma
+  only goes online for the update check against GitHub Releases and, when the user sets it up,
+  online forms against the user's own Supabase project (`src/lib/online.ts`).
 - **Use the platform bridge.** Save files with `saveAs` from `src/lib/platform.ts`, and ask the
   user things with `askText`, `askConfirm` and `toast` from `src/lib/dialog.tsx`. Browser
   `prompt`, `confirm` and `alert` don't work reliably inside OS webviews.
