@@ -1,6 +1,7 @@
 import { askConfirm, askText, errorText, toast } from "../../lib/dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownAZ, ArrowDownZA, Redo2, Undo2 } from "lucide-react";
+import { ArrowDownAZ, ArrowDownZA, ExternalLink, Mail, Redo2, Undo2 } from "lucide-react";
+import { findLinks, openLink } from "../../lib/links";
 import Papa from "papaparse";
 import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
@@ -341,6 +342,7 @@ export default function Sheets({ id }: { id: string }) {
                 const isSel = sel.r === r && sel.c === c;
                 const v = raw(r, c) ? evaluator(r, c) : "";
                 const shown = display(v);
+                const links = typeof v === "string" ? findLinks(shown) : [];
                 const cls = ["cell", inRange(r, c) && "in", isSel && "sel", typeof v === "number" && "num", typeof v === "object" && "err", headerRow && r === 0 && "hdr"].filter(Boolean).join(" ");
                 return (
                   <div
@@ -349,6 +351,10 @@ export default function Sheets({ id }: { id: string }) {
                     style={{ width: COL_W }}
                     title={shown.length > 14 ? shown : undefined}
                     onMouseDown={(e) => {
+                      if (links.length && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        return openLink(links[0].href);
+                      }
                       if (edit) finishEdit();
                       if (e.shiftKey) setSel({ r, c });
                       else { setSel({ r, c }); setAnchor({ r, c }); }
@@ -369,6 +375,21 @@ export default function Sheets({ id }: { id: string }) {
                         }}
                         onBlur={() => finishEdit()}
                       />
+                    ) : links.length ? (
+                      <>
+                        <span className="cell-link">{shown}</span>
+                        {isSel && !edit && range.r1 === range.r2 && range.c1 === range.c2 && (
+                          <span className="link-card" onMouseDown={(e) => e.stopPropagation()}>
+                            {links.slice(0, 3).map((l) => (
+                              <button key={l.index} title={`Open ${l.href.replace(/^mailto:/, "")}`} onClick={() => openLink(l.href)}>
+                                {l.href.startsWith("mailto:") ? <Mail /> : <ExternalLink />}
+                                <span>{l.text.replace(/^https?:\/\//, "")}</span>
+                              </button>
+                            ))}
+                            <span className="link-hint">Ctrl+click opens</span>
+                          </span>
+                        )}
+                      </>
                     ) : (
                       shown
                     )}

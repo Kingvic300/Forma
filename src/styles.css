@@ -341,7 +341,10 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; background
 .doc-page blockquote { margin: 10px 0; padding: 2px 16px; border-left: 3px solid #c7ccd6; color: #4a5266; }
 .doc-page pre { padding: 12px 14px; border-radius: 6px; background: #f0f1f3; font: 10pt/1.5 var(--mono); white-space: pre-wrap; }
 .doc-page img { max-width: 100%; }
-.doc-page a { color: #0e7490; }
+.doc-page a { color: #0e7490; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.doc-scroll { position: relative; }
+.doc-link-card { position: absolute; z-index: 10; display: flex; align-items: center; gap: 2px; max-width: 420px; padding: 4px 4px 4px 12px; background: var(--raised); border-radius: var(--r); box-shadow: var(--pop); }
+.dl-href { min-width: 0; margin-right: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cyan); font-size: 12.5px; }
 .doc-page table { width: 100%; margin: 10px 0; border-collapse: collapse; }
 .doc-page td, .doc-page th { min-width: 40px; padding: 6px 8px; border: 1px solid #c7ccd6; vertical-align: top; }
 .doc-page ::selection { background: rgba(14, 116, 144, 0.22); }
@@ -378,6 +381,13 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; background
 .sheet-tabs .add { width: 28px; padding: 0; background: transparent; border-color: transparent; box-shadow: none; color: var(--text-3); font-size: 16px; }
 .stats { margin-left: 14px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .stats b { color: var(--text-2); font-weight: 600; }
+.cell-link { color: var(--cyan); text-decoration: underline; text-decoration-color: rgba(60, 200, 220, 0.4); text-underline-offset: 2px; }
+.link-card { position: absolute; left: -1px; top: calc(100% + 4px); z-index: 6; display: flex; flex-direction: column; gap: 2px; min-width: 220px; max-width: 360px; padding: 4px; background: var(--raised); border-radius: var(--r); box-shadow: var(--pop); line-height: 1.3; animation: pop-in 120ms var(--ease); cursor: default; }
+.link-card button { justify-content: flex-start; gap: 8px; height: 28px; padding: 0 8px; background: transparent; border-color: transparent; box-shadow: none; color: var(--text); font-weight: 450; }
+.link-card button:hover:not(:disabled) { background: var(--active); border-color: transparent; }
+.link-card button svg { width: 14px; height: 14px; color: var(--cyan); }
+.link-card button span { overflow: hidden; text-overflow: ellipsis; }
+.link-hint { padding: 2px 8px 3px; font-size: 11px; color: var(--text-3); }
 
 /* Forms */
 .forms { --form: #b195f5; }
