@@ -1,6 +1,7 @@
-import { askText, toast } from "../lib/dialog";
 import { useEffect, useRef, useState } from "react";
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, Highlighter, IndentDecrease, IndentIncrease, List, ListOrdered, Minus, Redo2, RemoveFormatting, Undo2 } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, ExternalLink, Highlighter, IndentDecrease, IndentIncrease, List, ListOrdered, Minus, Redo2, RemoveFormatting, Undo2, Unlink } from "lucide-react";
+import { askText, toast } from "../lib/dialog";
+import { isSafeHref, linkifyElement, openLink } from "../lib/links";
 import { useFile } from "../lib/useFile";
 import { safeName, saveAs } from "../lib/platform";
 import { Menu, Missing, TitleBar } from "../ui";
@@ -21,6 +22,8 @@ export default function Docs({ id }: { id: string }) {
   const loaded = useRef(false);
   const imgRef = useRef<HTMLInputElement>(null);
   const [words, setWords] = useState(0);
+  const [linkCard, setLinkCard] = useState<{ a: HTMLAnchorElement; top: number; left: number } | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const [, force] = useState(0);
 
   useEffect(() => {
@@ -43,6 +46,43 @@ export default function Docs({ id }: { id: string }) {
     const text = page.current?.innerText ?? "";
     setWords(text.trim() ? text.trim().split(/\s+/).length : 0);
   }
+  // Clicking a link shows a small card (open / remove); Ctrl+click opens it directly.
+  function onPageClick(e: React.MouseEvent) {
+    const a = (e.target as HTMLElement).closest("a");
+    if (!a || !page.current?.contains(a)) return setLinkCard(null);
+    const href = a.getAttribute("href") ?? "";
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      setLinkCard(null);
+      return isSafeHref(href) ? openLink(href) : toast("Only web and email links can be opened", "error");
+    }
+    const box = a.getBoundingClientRect();
+    const outer = scroller.current!.getBoundingClientRect();
+    setLinkCard({ a, top: box.bottom - outer.top + scroller.current!.scrollTop + 6, left: box.left - outer.left + scroller.current!.scrollLeft });
+  }
+
+  function removeLink(a: HTMLAnchorElement) {
+    a.replaceWith(...Array.from(a.childNodes));
+    setLinkCard(null);
+    changed();
+  }
+
+  // Plain-text paste: keep line breaks and turn addresses into links. Rich paste keeps its own links.
+  function onPaste(e: React.ClipboardEvent) {
+    if (e.clipboardData.types.includes("text/html")) return;
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+    e.preventDefault();
+    const holder = document.createElement("div");
+    text.split(/\r?\n/).forEach((line, i) => {
+      if (i) holder.append(document.createElement("br"));
+      holder.append(line);
+    });
+    linkifyElement(holder);
+    exec("insertHTML", holder.innerHTML);
+    changed();
+  }
+
   const changed = () => {
     if (!page.current) return;
     f.setData({ html: page.current.innerHTML });
@@ -198,8 +238,15 @@ export default function Docs({ id }: { id: string }) {
         <B cmd="removeFormat" label={<RemoveFormatting />} title="Clear formatting" />
         <input ref={imgRef} type="file" accept="image/*" hidden onChange={(e) => { const file = e.target.files?.[0]; if (file) insertImage(file); e.target.value = ""; }} />
       </div>
-      <div className="doc-scroll">
-        <div ref={page} className="doc-page" contentEditable suppressContentEditableWarning spellCheck onInput={changed} />
+      <div className="doc-scroll" ref={scroller} onScroll={() => linkCard && setLinkCard(null)}>
+        <div ref={page} className="doc-page" contentEditable suppressContentEditableWarning spellCheck onInput={() => { setLinkCard(null); changed(); }} onClick={onPageClick} onPaste={onPaste} />
+        {linkCard && (
+          <div className="doc-link-card pop" style={{ top: linkCard.top, left: linkCard.left }} onMouseDown={(e) => e.preventDefault()}>
+            <span className="dl-href" title={linkCard.a.href}>{(linkCard.a.getAttribute("href") ?? "").replace(/^mailto:/, "")}</span>
+            <button className="icon" title="Open link (Ctrl+click)" onClick={() => { openLink(linkCard.a.getAttribute("href") ?? ""); setLinkCard(null); }}><ExternalLink /></button>
+            <button className="icon" title="Remove link" onClick={() => removeLink(linkCard.a)}><Unlink /></button>
+          </div>
+        )}
       </div>
       <div className="docbar">{words} {words === 1 ? "word" : "words"}</div>
     </div>

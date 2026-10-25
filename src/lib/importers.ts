@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { linkifyElement, linkifyHtml } from "./links";
 import { createFile, type Kind } from "./store";
 import type { SheetsData } from "../apps/sheets/types";
 import type { DocsData } from "../apps/Docs";
@@ -71,16 +72,17 @@ export async function importFile(file: File): Promise<{ kind: Kind; id: string }
   if (ext === "docx") {
     const mammoth = await import("mammoth");
     const res = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-    return { kind: "docs", id: await createFile("docs", name, { html: res.value || "<p><br></p>" }) };
+    return { kind: "docs", id: await createFile("docs", name, { html: linkifyHtml(res.value) || "<p><br></p>" }) };
   }
   if (ext === "html" || ext === "htm") {
     const doc = new DOMParser().parseFromString(await file.text(), "text/html");
     doc.querySelectorAll("script,style,iframe,object").forEach((n) => n.remove());
+    linkifyElement(doc.body);
     return { kind: "docs", id: await createFile("docs", name, { html: doc.body.innerHTML }) };
   }
   if (ext === "txt" || ext === "md") {
     const html = (await file.text()).split(/\r?\n/).map((l) => `<p>${escapeHtml(l) || "<br>"}</p>`).join("");
-    return { kind: "docs", id: await createFile("docs", name, { html }) };
+    return { kind: "docs", id: await createFile("docs", name, { html: linkifyHtml(html) }) };
   }
   if (ext === "json") {
     const form = JSON.parse(await file.text()) as FormData;
