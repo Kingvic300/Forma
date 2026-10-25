@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Forma</title>
+<meta name="description" content="Forma is a free, open-source desktop app for documents, spreadsheets, forms, PDFs and personal tracking. It works offline. Download it for Linux, macOS or Windows.">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<style>
+  @font-face {
+    font-family: "Mona Sans";
+    src: url("fonts/mona-sans-latin-wght-normal.woff2") format("woff2");
+    font-weight: 200 900;
+    font-display: swap;
+  }
+  /* Same tokens as the app (src/styles.css). */
+  :root {
+    --bg: #000; --chrome: #0a0a0a; --panel: #0d0d0d; --raised: #171717; --hover: #1f1f1f;
+    --line-soft: #161616; --line: #222; --line-strong: #333;
+    --text: #ededed; --text-2: #a1a1a1; --text-3: #6e6e6e;
+    --cyan: #3cc8dc; --cyan-hover: #62d5e6; --cyan-ink: #04171c; --cyan-soft: rgba(60, 200, 220, .13);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--text); color-scheme: dark; }
+  body { margin: 0; font: 15px/1.55 "Mona Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--cyan); }
+  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 17px; color: var(--text); text-decoration: none; }
+  .brand img { width: 30px; height: 30px; }
+  nav a { color: var(--text-2); text-decoration: none; margin-left: 22px; font-size: 14px; }
+  nav a:hover { color: var(--text); }
+
+  .hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; padding: 56px 0 80px; }
+  h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.06; letter-spacing: -.03em; margin: 0; font-weight: 680; max-width: 15ch; }
+  .lede { color: var(--text-2); font-size: 17px; max-width: 48ch; margin: 20px 0 30px; }
+  .primary { display: inline-flex; align-items: center; gap: 10px; background: var(--cyan); color: var(--cyan-ink); font-weight: 650; padding: 13px 20px; border-radius: 9px; text-decoration: none; font-size: 16px; }
+  .primary:hover { background: var(--cyan-hover); }
+  .primary svg { width: 18px; height: 18px; }
+  .meta { color: var(--text-3); font-size: 13px; margin-top: 12px; }
+  .meta a { color: var(--text-2); }
+
+  /* The app switcher, drawn the way it looks in Forma. */
+  .switcher { background: var(--raised); border-radius: 12px; padding: 8px; box-shadow: 0 0 0 1px var(--line-strong), 0 30px 60px -20px rgba(0, 0, 0, .9); }
+  .switcher-box { display: flex; align-items: center; gap: 10px; padding: 8px 10px 12px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+  .switcher-box img { width: 28px; height: 28px; }
+  .switcher-box b { display: block; font-size: 14px; font-weight: 650; line-height: 1.2; }
+  .switcher-box span { font-size: 12px; color: var(--text-3); }
+  .switcher-box svg { margin-left: auto; width: 16px; height: 16px; color: var(--text-3); }
+  .apps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+  .app { padding: 12px 10px 11px; border-radius: 7px; }
+  .app.on { background: rgba(255, 255, 255, .08); }
+  .icon { width: 34px; height: 34px; border-radius: 28%; display: grid; place-items: center; margin-bottom: 9px; color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+  .icon svg { width: 19px; height: 19px; }
+  .app b { display: block; font-size: 13.5px; font-weight: 620; }
+  .app span { display: block; font-size: 12px; color: var(--text-3); line-height: 1.35; margin-top: 2px; }
+  .key { display: inline-block; font-style: normal; margin-top: 7px; font-size: 10.5px; font-weight: 600; color: var(--text-3); border: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .05); border-radius: 4px; padding: 1px 5px; }
+
+  section { padding: 64px 0; border-top: 1px solid var(--line-soft); }
+  h2 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 6px; font-weight: 650; }
+  .sub { color: var(--text-2); margin: 0 0 28px; }
+
+  .platforms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .platform { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .platform.mine { border-color: var(--cyan); }
+  .platform h3 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+  .platform h3 small { font-size: 11.5px; font-weight: 600; color: var(--cyan); background: var(--cyan-soft); padding: 1px 7px; border-radius: 5px; }
+  .platform p { color: var(--text-2); font-size: 13.5px; margin: 0 0 14px; }
+  .files { display: flex; flex-direction: column; gap: 6px; }
+  .file { display: flex; justify-content: space-between; gap: 10px; padding: 9px 11px; border-radius: 7px; background: var(--raised); color: var(--text); text-decoration: none; font-size: 13.5px; }
+  .file:hover { background: var(--hover); }
+  .file em { color: var(--text-3); font-style: normal; white-space: nowrap; }
+  .empty { color: var(--text-3); font-size: 13.5px; margin: 0; }
+  .hint { color: var(--text-3); font-size: 12.5px; margin-top: 10px; }
+
+  .inside { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 48px; }
+  .item { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--line-soft); }
+  .item .icon { margin: 2px 0 0; }
+  .item b { display: block; font-size: 15px; font-weight: 620; }
+  .item span { color: var(--text-2); font-size: 14px; }
+
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; }
+  .fact b { display: block; font-size: 15px; font-weight: 620; margin-bottom: 4px; }
+  .fact span { color: var(--text-2); font-size: 14px; }
+
+  .release { padding: 20px 0; border-bottom: 1px solid var(--line-soft); }
+  .release-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .release h3 { margin: 0; font-size: 17px; font-weight: 620; }
+  .release time { color: var(--text-3); font-size: 13px; }
+  .notes { color: var(--text-2); font-size: 14px; white-space: pre-wrap; margin: 8px 0 12px; max-width: 75ch; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips a { font-size: 12.5px; padding: 4px 9px; border-radius: 6px; background: var(--raised); color: var(--text); text-decoration: none; }
+  .chips a:hover { background: var(--hover); }
+  footer { color: var(--text-3); font-size: 13px; padding: 36px 0 60px; border-top: 1px solid var(--line-soft); }
+  footer a { color: var(--text-2); }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 28px; }
+    .platforms, .inside { grid-template-columns: 1fr; }
+    .facts { grid-template-columns: repeat(2, 1fr); }
+    nav a:not(:last-child) { display: none; }
+  }
+  @media (max-width: 520px) {
+    .apps { grid-template-columns: repeat(2, 1fr); }
+    .facts { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) { .file, .primary, .chips a { transition: background .15s; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-files" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></g>
+    <g id="i-docs" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/></g>
+    <g id="i-sheets" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 9v12M15 9v12"/></g>
+    <g id="i-forms" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></g>
+    <g id="i-pdf" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4M13.38 15.62a1 1 0 0 0-3-3L5 18v4h4Z"/></g>
+    <g id="i-tracker" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.8 10A10 10 0 1 1 17 3.34"/><path d="m9 11 3 3L22 4"/></g>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="./"><img src="logo.svg" alt="">Forma</a>
+    <nav><a href="#download">Download</a><a href="#releases">Releases</a><a href="https://github.com/Kingvic300/Forma">Source code</a></nav>
+  </header>
+
+  <div class="hero">
+    <div>
+      <h1>Your documents, spreadsheets, forms and PDFs in one app.</h1>
+      <p class="lede">Write documents, open CSV and Excel files, collect form responses, fill and sign PDFs, and keep track of your tasks. Switch between them from one box at the top, the way you switch apps in Gmail. Everything stays on your computer and works offline.</p>
+      <a id="cta" class="primary" href="https://github.com/Kingvic300/Forma/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>
+        <span id="cta-label">Download Forma</span>
+      </a>
+      <p class="meta" id="cta-meta">Free and open source. Linux, macOS and Windows.</p>
+    </div>
+    <div class="switcher" aria-label="Forma's app switcher, showing its six apps">
+      <div class="switcher-box">
+        <img src="logo.svg" alt="">
+        <div><b>PDF</b><span>Forma</span></div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>
+      </div>
+      <div class="apps">
+        <div class="app" style="--c:#8d97ab"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-files"/></svg></div><b>Files</b><span>Everything you’ve made or opened</span><i class="key">Ctrl 1</i></div>
+        <div class="app" style="--c:#7c9dff"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-docs"/></svg></div><b>Docs</b><span>Documents and letters</span><i class="key">Ctrl 2</i></div>
+        <div class="app" style="--c:#4fbf8b"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-sheets"/></svg></div><b>Sheets</b><span>Spreadsheets, CSV and Excel</span><i class="key">Ctrl 3</i></div>
+        <div class="app" style="--c:#b195f5"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-forms"/></svg></div><b>Forms</b><span>Questions and responses</span><i class="key">Ctrl 4</i></div>
+        <div class="app on" style="--c:#f07a80"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-pdf"/></svg></div><b>PDF</b><span>Fill, sign and edit PDFs</span><i class="key">Ctrl 5</i></div>
+        <div class="app" style="--c:#e2b25b"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-tracker"/></svg></div><b>Tracker</b><span>Tasks, habits and notes</span><i class="key">Ctrl 6</i></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download</h2>
+    <p class="sub" id="version-line">Pick the installer for your computer.</p>
+    <div class="platforms">
+      <div class="platform" data-os="linux"><h3>Linux</h3><p>Debian, Ubuntu and Kali, or any distribution with the AppImage.</p><div class="files"><p class="empty">Loading…</p></div></div>
+      <div class="platform" data-os="mac"><h3>macOS</h3><p>Apple silicon and Intel. macOS 11 or later.</p><div class="files"><p class="empty">Loading…</p></div><p class="hint">First launch: right-click Forma in Applications and choose Open.</p></div>
+      <div class="platform" data-os="windows"><h3>Windows</h3><p>Windows 10 and 11, 64-bit.</p><div class="files"><p class="empty">Loading…</p></div><p class="hint">If SmartScreen warns you, choose More info, then Run anyway.</p></div>
+    </div>
+    <p class="hint" style="margin-top:18px">Already installed? Forma updates itself. New versions download in the background, and you restart when it suits you.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What’s inside</h2>
+    <p class="sub">Six apps that share one window, one search (Ctrl+K) and one place for your files.</p>
+    <div class="inside">
+      <div class="item"><div class="icon" style="--c:#7c9dff"><svg viewBox="0 0 24 24"><use href="#i-docs"/></svg></div><div><b>Docs</b><span>Headings, lists, tables, images and links. Opens Word, HTML, text and Markdown files; saves as Word, HTML, text or PDF.</span></div></div>
+      <div class="item"><div class="icon" style="--c:#4fbf8b"><svg viewBox="0 0 24 24"><use href="#i-sheets"/></svg></div><div><b>Sheets</b><span>Formulas such as SUM, AVERAGE, IF and COUNTIF, several sheets per file, sort and filter. Opens and saves CSV and Excel.</span></div></div>
+      <div class="item"><div class="icon" style="--c:#b195f5"><svg viewBox="0 0 24 24"><use href="#i-forms"/></svg></div><div><b>Forms</b><span>Nine question types. Collect answers on your computer, see them as charts, or open them in Sheets.</span></div></div>
+      <div class="item"><div class="icon" style="--c:#f07a80"><svg viewBox="0 0 24 24"><use href="#i-pdf"/></svg></div><div><b>PDF</b><span>Add text and dates, sign or initial, fill a PDF’s own form fields, highlight, white out, merge and reorder pages.</span></div></div>
+      <div class="item"><div class="icon" style="--c:#e2b25b"><svg viewBox="0 0 24 24"><use href="#i-tracker"/></svg></div><div><b>Tracker</b><span>Tasks with due dates and priority, daily habits with streaks, and a short note for each day.</span></div></div>
+      <div class="item"><div class="icon" style="--c:#8d97ab"><svg viewBox="0 0 24 24"><use href="#i-files"/></svg></div><div><b>Files</b><span>Every file you’ve made or opened, with search. Drop files onto the window to open them.</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap facts">
+    <div class="fact"><b>Works offline</b><span>Files are stored on your computer. There’s no Forma account or server.</span></div>
+    <div class="fact"><b>Updates itself</b><span>Install once. Each update is signed and only installs if the signature checks out.</span></div>
+    <div class="fact"><b>No telemetry</b><span>No analytics or crash reports. The only network request is the update check.</span></div>
+    <div class="fact"><b>Open source</b><span>MIT licensed. Read the code, report bugs or send improvements.</span></div>
+  </div>
+</section>
+
+<section id="releases">
+  <div class="wrap">
+    <h2>Releases</h2>
+    <p class="sub">What changed in each version.</p>
+    <div id="release-list"><p class="empty">Loading releases…</p></div>
+  </div>
+</section>
+
+<div class="wrap"><footer>Forma is MIT licensed. <a href="https://github.com/Kingvic300/Forma">Source on GitHub</a>. This page reads the release list straight from GitHub and has no analytics.</footer></div>
+
+<script>
+(() => {
+  const REPO = "Kingvic300/Forma";
+  const ua = navigator.userAgent.toLowerCase();
+  const os = /windows/.test(ua) ? "windows" : /mac os|macintosh/.test(ua) ? "mac" : /linux|x11/.test(ua) && !/android/.test(ua) ? "linux" : null;
+  const LABEL = { linux: "Linux", mac: "macOS", windows: "Windows" };
+
+  function classify(name) {
+    const n = name.toLowerCase();
+    if (n.endsWith(".sig") || n.endsWith(".json") || n.endsWith(".tar.gz") || n.endsWith(".zip")) return null; // files the updater uses
+    if (n.endsWith(".deb")) return { os: "linux", label: "Debian / Ubuntu / Kali (.deb)", rank: 1 };
+    if (n.endsWith(".appimage")) return { os: "linux", label: "AppImage, any distribution", rank: 2 };
+    if (n.endsWith(".rpm")) return { os: "linux", label: "Fedora / openSUSE (.rpm)", rank: 3 };
+    if (n.endsWith(".dmg")) return { os: "mac", label: n.includes("aarch64") ? "Apple silicon (M1 and later)" : "Intel", rank: n.includes("aarch64") ? 1 : 2 };
+    if (n.endsWith("-setup.exe")) return { os: "windows", label: "Installer (.exe)", rank: 1 };
+    if (n.endsWith(".msi")) return { os: "windows", label: "Installer for managed PCs (.msi)", rank: 2 };
+    return null;
+  }
+  const size = (b) => (b > 1048576 ? (b / 1048576).toFixed(0) + " MB" : Math.ceil(b / 1024) + " KB");
+  const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const day = (d, month) => new Date(d).toLocaleDateString(undefined, { day: "numeric", month, year: "numeric" });
+
+  // Release notes contain a Markdown download table; keep only the prose.
+  function notes(body) {
+    return (body || "")
+      .split("\n")
+      .filter((l) => !/^\s*\|/.test(l) && !/^#+\s/.test(l))
+      .join("\n")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/\*\*|`/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  if (os) {
+    document.querySelector(`.platform[data-os="${os}"]`).classList.add("mine");
+    document.querySelector(`.platform[data-os="${os}"] h3`).insertAdjacentHTML("beforeend", "<small>Your system</small>");
+  }
+
+  fetch(`https://api.github.com/repos/${REPO}/releases?per_page=10`, { headers: { Accept: "application/vnd.github+json" } })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((releases) => {
+      releases = releases.filter((r) => !r.draft);
+      const latest = releases.find((r) => !r.prerelease);
+      if (!latest) {
+        document.getElementById("version-line").textContent = "The first release is being built. Check back in a few minutes.";
+        document.querySelectorAll(".files").forEach((el) => (el.innerHTML = `<p class="empty">Not available yet.</p>`));
+        document.getElementById("release-list").innerHTML = `<p class="empty">No releases yet.</p>`;
+        return;
+      }
+      document.getElementById("version-line").textContent = `Forma ${latest.tag_name.replace(/^v/, "")}, released ${day(latest.published_at, "long")}.`;
+
+      const groups = { linux: [], mac: [], windows: [] };
+      for (const a of latest.assets) {
+        const c = classify(a.name);
+        if (c) groups[c.os].push({ ...c, url: a.browser_download_url, size: a.size });
+      }
+      for (const [k, files] of Object.entries(groups)) {
+        files.sort((x, y) => x.rank - y.rank);
+        document.querySelector(`.platform[data-os="${k}"] .files`).innerHTML = files.length
+          ? files.map((f) => `<a class="file" href="${f.url}">${esc(f.label)}<em>${size(f.size)}</em></a>`).join("")
+          : `<p class="empty">Not available in this release yet.</p>`;
+      }
+      if (os && groups[os].length) {
+        const best = groups[os][0];
+        document.getElementById("cta").href = best.url;
+        document.getElementById("cta-label").textContent = `Download for ${LABEL[os]}`;
+        document.getElementById("cta-meta").innerHTML = `${esc(best.label)}, ${size(best.size)}. <a href="#download">Other systems</a>`;
+      }
+
+      document.getElementById("release-list").innerHTML = releases
+        .map((r) => {
+          const files = r.assets.map((a) => ({ a, c: classify(a.name) })).filter((x) => x.c);
+          const text = notes(r.body);
+          return `<article class="release">
+            <div class="release-head"><h3>${esc(r.name || r.tag_name)}</h3><time datetime="${r.published_at}">${day(r.published_at, "short")}</time></div>
+            ${text ? `<div class="notes">${esc(text)}</div>` : ""}
+            <div class="chips">${files.map(({ a, c }) => `<a href="${a.browser_download_url}">${LABEL[c.os]}: ${esc(c.label)}</a>`).join("")}<a href="${r.html_url}">All files</a></div>
+          </article>`;
+        })
+        .join("");
+    })
+    .catch(() => {
+      document.getElementById("release-list").innerHTML = `<p class="empty">Couldn’t load releases right now. <a href="https://github.com/${REPO}/releases">See them on GitHub</a>.</p>`;
+      document.querySelectorAll(".files").forEach((el) => (el.innerHTML = `<a class="file" href="https://github.com/${REPO}/releases/latest">Open the latest release<em>GitHub</em></a>`));
+    });
+})();
+</script>
+</body>
+</html>
