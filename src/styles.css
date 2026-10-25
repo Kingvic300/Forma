@@ -507,6 +507,9 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .ann-highlight { mix-blend-mode: multiply; opacity: 0.45; }
 .ann-highlight.sel { opacity: 0.6; }
 .ann-rect { border: 2px solid; }
+.ann-redact { background: #000; }
+.ann-redact.sel { outline-color: var(--cyan); }
+.draft.redact { background: #000; border-color: #000; }
 .ann-line { position: absolute; left: 0; right: 0; top: 50%; height: 1.5px; transform: translateY(-50%); }
 .ann-image img { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
 .ann-text { min-width: 8px; padding: 0; outline: none; white-space: pre; line-height: 1.2; cursor: text; user-select: text; }

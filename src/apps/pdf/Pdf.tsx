@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Signature, Square, Trash2, Type, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Signature, Square, Trash2, Type, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -9,6 +9,7 @@ import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
 import { uid } from "../../lib/store";
 import { Missing, TitleBar } from "../../ui";
+import { rasterizePage } from "./redact";
 import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields, type FieldInfo } from "./exportPdf";
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { CSS_FONT, type Ann, type Font, type PdfData } from "./types";
@@ -43,8 +44,8 @@ async function pageLinks(doc: PDFDocumentProxy, index: number): Promise<PageLink
   return out;
 }
 
-type Tool = "select" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "rect" | "line" | "check" | "cross";
-const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "rect", "line"];
+type Tool = "select" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross";
+const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "redact", "rect", "line"];
 const TOOLS: [Tool, typeof Type, string][] = [
   ["select", MousePointer2, "Select"],
   ["text", Type, "Text"],
@@ -56,6 +57,7 @@ const TOOLS: [Tool, typeof Type, string][] = [
   ["image", ImageIcon, "Image"],
   ["highlight", Highlighter, "Highlight (drag)"],
   ["whiteout", Eraser, "White-out (drag)"],
+  ["redact", EyeOff, "Redact (drag)"],
   ["rect", Square, "Box (drag)"],
   ["line", Minus, "Line (drag)"],
 ];
@@ -185,9 +187,18 @@ export default function Pdf({ id }: { id: string }) {
     pageOp("Adding page…", () => insertBlankPage(data.bytes, i + 1), (anns) => anns.map((a) => (a.page > i ? { ...a, page: a.page + 1 } : a)));
 
   async function download() {
-    setBusy("Building PDF…");
+    const redacted = new Set(data.anns.filter((a) => a.type === "redact").map((a) => a.page)).size;
+    if (
+      redacted &&
+      !(await askConfirm("Download with redactions?", {
+        body: `Everything under the black boxes is permanently removed from the downloaded copy. The ${redacted === 1 ? "redacted page is" : `${redacted} redacted pages are`} saved as ${redacted === 1 ? "an image" : "images"}, so ${redacted === 1 ? "its" : "their"} text can't be selected or searched. The boxes stay editable here in Forma.`,
+        confirmLabel: "Redact and download",
+      }))
+    )
+      return;
+    setBusy(redacted ? "Redacting…" : "Building PDF…");
     try {
-      await saveAs(`${safeName(f.meta!.name)}.pdf`, await buildPdf(data));
+      await saveAs(`${safeName(f.meta!.name)}${redacted ? " (redacted)" : ""}.pdf`, await buildPdf(data, rasterizePage));
     } catch (e) {
       toast(`Couldn’t build the PDF: ${errorText(e)}`, "error");
     } finally {
@@ -221,7 +232,7 @@ export default function Pdf({ id }: { id: string }) {
       {sel && (
         <div className="props">
           <span className="muted">{sel.type === "text" ? "Text" : sel.type === "image" ? "Image" : sel.type}</span>
-          {sel.type !== "image" && <label className="color" title="Color">Color <input type="color" value={sel.color ?? "#000000"} onChange={(e) => update(sel.id, { color: e.target.value })} /></label>}
+          {sel.type !== "image" && sel.type !== "redact" && <label className="color" title="Color">Color <input type="color" value={sel.color ?? "#000000"} onChange={(e) => update(sel.id, { color: e.target.value })} /></label>}
           {sel.type === "text" && (
             <>
               <select value={sel.font ?? "helv"} onChange={(e) => update(sel.id, { font: e.target.value as Font })}>
@@ -241,7 +252,14 @@ export default function Pdf({ id }: { id: string }) {
       )}
       {tool !== "select" && (
         <div className="hint-bar">
-          {DRAG_TOOLS.includes(tool) ? "Drag on the page to draw." : pending ? "Click where it should go." : "Click on the page to place."} Press Esc to stop.
+          {tool === "redact"
+            ? "Drag over anything that must be removed. It’s deleted from the downloaded PDF, not just covered."
+            : DRAG_TOOLS.includes(tool)
+              ? "Drag on the page to draw."
+              : pending
+                ? "Click where it should go."
+                : "Click on the page to place."}{" "}
+          Press Esc to stop.
         </div>
       )}
       <div className="pdf-body">
