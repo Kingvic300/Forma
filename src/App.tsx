@@ -4,12 +4,12 @@ import Home from "./Home";
 import { CommandPalette } from "./CommandPalette";
 import { DialogHost, errorText, toast } from "./lib/dialog";
 import { ACCEPT, importFile } from "./lib/importers";
-import { isTauri, onFilesOpened, takeLaunchFiles } from "./lib/platform";
-import { APPS, go, switchTo, useRoute, type AppId } from "./lib/route";
+import { isTauri, onFilesOpened, takeLaunchFiles, toggleFullscreen } from "./lib/platform";
+import { APPS, go, NAV_APPS, switchTo, useRoute, type AppId } from "./lib/route";
 import { getOnlineConfig, type OnlineConfig } from "./lib/online";
 import { getSetting, setSetting, useFiles, type Meta } from "./lib/store";
 import { OnlineSetup } from "./OnlineSetup";
-import { AppIcon, AppSwitcher, Logo, Modal, Spinner } from "./ui";
+import { AppIcon, AppSwitcher, CLOSE_FILE, Logo, Modal, Spinner } from "./ui";
 import { UpdateBanner, useUpdater } from "./Updater";
 import { FormView } from "./apps/forms/FormFill";
 import pkg from "../package.json";
@@ -44,11 +44,15 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F11") {
+        e.preventDefault();
+        return void toggleFullscreen();
+      }
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (!e.shiftKey && /^[1-6]$/.test(k)) {
+      if (!e.shiftKey && new RegExp(`^[1-${NAV_APPS.length}]$`).test(k)) {
         e.preventDefault();
-        switchTo(APPS[Number(k) - 1].id, app);
+        switchTo(NAV_APPS[Number(k) - 1].id, app);
       } else if (k === "k" || (e.shiftKey && k === "p")) {
         e.preventDefault();
         setPalette((p) => !p);
@@ -65,6 +69,12 @@ export default function App() {
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
+  });
+
+  useEffect(() => {
+    const close = () => id && tabs.close(id);
+    addEventListener(CLOSE_FILE, close);
+    return () => removeEventListener(CLOSE_FILE, close);
   });
 
   // Files opened from the OS ("Open with Forma", double-click, command line).
@@ -109,7 +119,7 @@ export default function App() {
           <span className="key">Ctrl K</span>
         </button>
         <nav className="sb-nav" aria-label="Apps">
-          {APPS.map((a, i) => (
+          {NAV_APPS.map((a, i) => (
             <button key={a.id} className={"sb-item" + (a.id === app ? " on" : "")} aria-current={a.id === app ? "page" : undefined} onClick={() => switchTo(a.id, app)}>
               <AppIcon app={a.id} size={20} />
               <span className="sb-label">{a.name}</span>

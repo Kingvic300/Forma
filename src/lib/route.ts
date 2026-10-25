@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 
 export type AppId = "drive" | "docs" | "sheets" | "forms" | "pdf" | "tracker";
 
-export const APPS: { id: AppId; name: string; blurb: string }[] = [
+export const APPS: { id: AppId; name: string; blurb: string; hidden?: boolean }[] = [
   { id: "drive", name: "Files", blurb: "Everything you’ve made or opened" },
   { id: "docs", name: "Docs", blurb: "Documents and letters" },
   { id: "sheets", name: "Sheets", blurb: "Spreadsheets, CSV and Excel" },
-  { id: "forms", name: "Forms", blurb: "Questions and responses" },
+  { id: "forms", name: "Forms", blurb: "Questions and responses", hidden: true }, // paused for now; existing forms still open
   { id: "pdf", name: "PDF", blurb: "Fill, sign and edit PDFs" },
   { id: "tracker", name: "Tracker", blurb: "Tasks, habits and notes" },
 ];
+
+/** Apps shown in the sidebar, the app grid, shortcuts and the command palette. */
+export const NAV_APPS = APPS.filter((a) => !a.hidden);
 
 // Last route visited in each app, so switching apps returns to the open file (like Gmail's switcher).
 const last: Partial<Record<AppId, string>> = {};

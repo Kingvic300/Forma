@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CornerDownLeft, Download, FilePlus2, FolderOpen, Search, Settings } from "lucide-react";
+import { ArrowRight, CornerDownLeft, Download, Expand, FilePlus2, FolderOpen, Maximize2, Search, Settings } from "lucide-react";
 import { blank } from "./lib/importers";
-import { APPS, go, switchTo, type AppId } from "./lib/route";
+import { isTauri, toggleFullscreen, toggleMaximize } from "./lib/platform";
+import { go, NAV_APPS, switchTo, type AppId } from "./lib/route";
 import { createFile, useFiles, type Kind } from "./lib/store";
 import { AppIcon, timeAgo } from "./ui";
 
@@ -10,7 +11,6 @@ type Item = { id: string; group: string; title: string; hint?: string; icon: Rea
 const NEW: [Kind, string, string][] = [
   ["docs", "New document", "Untitled document"],
   ["sheets", "New spreadsheet", "Untitled spreadsheet"],
-  ["forms", "New form", "Untitled form"],
   ["tracker", "New tracker", "My tracker"],
 ];
 
@@ -51,11 +51,13 @@ export function CommandPalette({ open, setOpen, current, onOpenFile, onSettings,
       out.push({ id: "new-" + kind, group: "Create", title: label, icon: <FilePlus2 />, run: async () => go(`/${kind}/${await createFile(kind, name, blank(kind))}`) }),
     );
     if (match("Open a file from your computer pdf csv excel word")) out.push({ id: "open", group: "Create", title: "Open a file from your computer…", hint: "PDF, CSV, Excel, Word", icon: <FolderOpen />, run: onOpenFile });
-    APPS.filter((a) => match(a.name) || match("go to " + a.name)).forEach((a) =>
-      out.push({ id: "go-" + a.id, group: "Go to", title: a.name, hint: a.blurb, icon: <AppIcon app={a.id} size={22} />, keys: `Ctrl ${APPS.indexOf(a) + 1}`, run: () => switchTo(a.id, current) }),
+    NAV_APPS.filter((a) => match(a.name) || match("go to " + a.name)).forEach((a) =>
+      out.push({ id: "go-" + a.id, group: "Go to", title: a.name, hint: a.blurb, icon: <AppIcon app={a.id} size={22} />, keys: `Ctrl ${NAV_APPS.indexOf(a) + 1}`, run: () => switchTo(a.id, current) }),
     );
     if (match("Settings preferences")) out.push({ id: "settings", group: "Forma", title: "Settings", icon: <Settings />, keys: "Ctrl ,", run: onSettings });
     if (onCheckUpdates && match("Check for updates")) out.push({ id: "update", group: "Forma", title: "Check for updates", icon: <Download />, run: onCheckUpdates });
+    if (isTauri && match("Maximise maximize restore window size")) out.push({ id: "maximize", group: "Window", title: "Maximise or restore window", icon: <Maximize2 />, run: toggleMaximize });
+    if (match("Full screen fullscreen")) out.push({ id: "fullscreen", group: "Window", title: "Full screen", icon: <Expand />, keys: "F11", run: toggleFullscreen });
     return out;
   }, [q, files, current, onOpenFile, onSettings, onCheckUpdates]);
 

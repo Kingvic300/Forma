@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, CircleCheckBig, FileSignature, FileText, Folder, ListChecks, Loader2, Sheet, X } from "lucide-react";
-import { APPS, go, type AppId } from "./lib/route";
+import { APPS, go, NAV_APPS, type AppId } from "./lib/route";
 import type { Meta } from "./lib/store";
 
 /** Forma mark: a geometric F with a cyan full stop, on a charcoal tile. */
@@ -71,7 +71,7 @@ export function AppSwitcher({ current, open, setOpen, onPick }: { current: AppId
   if (!open) return null;
   return (
     <div className="switcher pop" ref={ref} role="menu" aria-label="Apps">
-      {APPS.map((a, i) => (
+      {NAV_APPS.map((a, i) => (
         <button
           key={a.id}
           ref={a.id === current ? first : undefined}
@@ -109,7 +109,11 @@ export function Menu({ label, children, align = "right" }: { label: ReactNode; c
   );
 }
 
-/** The header of every open file: App / file name, save state, and the app's actions. */
+/** Ask the window to close the open file (the shell decides which file to show next). */
+export const CLOSE_FILE = "forma:close-file";
+export const closeOpenFile = () => dispatchEvent(new Event(CLOSE_FILE));
+
+/** The header of every open file: App / file name, save state, close, and the app's actions. */
 export function TitleBar({ meta, onRename, saved, app, children }: { meta: Meta; onRename: (n: string) => void; saved: boolean; app: AppId; children?: ReactNode }) {
   const name = APPS.find((a) => a.id === app)!.name;
   return (
@@ -124,6 +128,9 @@ export function TitleBar({ meta, onRename, saved, app, children }: { meta: Meta;
         {saved ? <Check /> : <Loader2 className="spin" />}
         {saved ? "Saved" : "Saving"}
       </span>
+      <button className="icon close-file" title="Close (Ctrl+W)" aria-label={`Close ${meta.name || "file"}`} onClick={closeOpenFile}>
+        <X />
+      </button>
       <span className="grow" />
       {children}
     </div>

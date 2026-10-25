@@ -15,7 +15,7 @@ const NEW: Record<Kind, { label: string; name: string }> = {
 };
 const KIND_NAME: Record<Kind, string> = { docs: "Document", sheets: "Spreadsheet", forms: "Form", pdf: "PDF", tracker: "Tracker" };
 const EMPTY: Record<AppId, [string, string]> = {
-  drive: ["Nothing here yet", "Create a document, spreadsheet, form or tracker, or open a file from your computer. PDF, CSV, Excel and Word files all work."],
+  drive: ["Nothing here yet", "Create a document, spreadsheet or tracker, or open a file from your computer. PDF, CSV, Excel and Word files all work."],
   docs: ["No documents yet", "Start a blank document, or open a Word, HTML, text or Markdown file to keep editing it here."],
   sheets: ["No spreadsheets yet", "Start a blank spreadsheet, or open a CSV or Excel file. Formulas like =SUM(A1:A9) work as you’d expect."],
   forms: ["No forms yet", "Build a form, fill it in on this computer, and see the responses as charts or in a spreadsheet."],
@@ -45,7 +45,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
   }
 
   const shown = (files ?? []).filter((f) => f.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const creatable: Kind[] = kind ? (kind === "pdf" ? [] : [kind]) : ["docs", "sheets", "forms", "tracker"];
+  const creatable: Kind[] = kind ? (kind === "pdf" ? [] : [kind]) : ["docs", "sheets", "tracker"];
 
   return (
     <div
