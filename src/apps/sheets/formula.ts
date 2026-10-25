@@ -174,3 +174,144 @@ function criteria(c: Val): (v: Val) => boolean {
     }
   };
 }
+
+export function makeEvaluator(cells: string[][]) {
+  const cache = new Map<string, Val | FErr>();
+  const visiting = new Set<string>();
+  const parsed = new Map<string, Node | FErr>();
+
+  function value(r: number, c: number): Val | FErr {
+    const key = r + "," + c;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const raw = cells[r]?.[c] ?? "";
+    let v: Val | FErr;
+    if (raw.startsWith("=") && raw.length > 1) {
+      if (visiting.has(key)) return new FErr("#CYCLE!");
+      visiting.add(key);
+      try {
+        let ast = parsed.get(raw);
+        if (!ast) {
+          try { ast = parse(raw.slice(1)); } catch (e) { ast = e instanceof FErr ? e : new FErr("#ERROR!"); }
+          parsed.set(raw, ast);
+        }
+        if (ast instanceof FErr) throw ast;
+        v = scalar(evaluate(ast));
+        if (typeof v === "number" && !isFinite(v)) v = new FErr("#NUM!");
+      } catch (e) {
+        v = e instanceof FErr ? e : new FErr("#ERROR!");
+      }
+      visiting.delete(key);
+    } else if (raw.trim() !== "" && !isNaN(Number(raw))) v = Number(raw);
+    else v = raw;
+    cache.set(key, v);
+    return v;
+  }
+
+  const get = (r: number, c: number): Val => {
+    const v = value(r, c);
+    if (v instanceof FErr) throw v;
+    return v;
+  };
+
+  const scalar = (v: Val | Val[]): Val => (Array.isArray(v) ? v[0] ?? "" : v);
+
+  function evaluate(n: Node): Val | Val[] {
+    switch (n.k) {
+      case "lit": return n.v;
+      case "ref": return get(n.r, n.c);
+      case "range": {
+        const out: Val[] = [];
+        for (let r = n.r1; r <= n.r2; r++) for (let c = n.c1; c <= n.c2; c++) out.push(get(r, c));
+        return out;
+      }
+      case "neg": return -num(scalar(evaluate(n.a)));
+      case "pct": return num(scalar(evaluate(n.a))) / 100;
+      case "bin": {
+        const a = scalar(evaluate(n.a));
+        const b = scalar(evaluate(n.b));
+        switch (n.op) {
+          case "+": return num(a) + num(b);
+          case "-": return num(a) - num(b);
+          case "*": return num(a) * num(b);
+          case "/": if (num(b) === 0) throw new FErr("#DIV/0!"); return num(a) / num(b);
+          case "^": return Math.pow(num(a), num(b));
+          case "&": return str(a) + str(b);
+        }
+        const bothNum = typeof a !== "string" && typeof b !== "string";
+        const x = bothNum ? num(a) : str(a).toLowerCase();
+        const y = bothNum ? num(b) : str(b).toLowerCase();
+        switch (n.op) {
+          case "=": return x === y;
+          case "<>": return x !== y;
+          case "<": return x < y;
+          case ">": return x > y;
+          case "<=": return x <= y;
+          default: return x >= y;
+        }
+      }
+      case "call": return call(n.name, n.args);
+    }
+  }
+
+  function call(name: string, args: Node[]): Val | Val[] {
+    const flat = () => args.flatMap((a) => { const v = evaluate(a); return Array.isArray(v) ? v : [v]; });
+    const arg = (i: number) => scalar(evaluate(args[i] ?? { k: "lit", v: "" }));
+    const numArgs = () => args.flatMap((a) => {
+      const v = evaluate(a);
+      return Array.isArray(v) ? nums(v) : [num(v)];
+    });
+    switch (name) {
+      case "SUM": return numArgs().reduce((s, x) => s + x, 0);
+      case "AVERAGE": case "AVG": {
+        const xs = numArgs();
+        if (!xs.length) throw new FErr("#DIV/0!");
+        return xs.reduce((s, x) => s + x, 0) / xs.length;
+      }
+      case "MIN": { const xs = numArgs(); return xs.length ? Math.min(...xs) : 0; }
+      case "MAX": { const xs = numArgs(); return xs.length ? Math.max(...xs) : 0; }
+      case "COUNT": return nums(flat()).length;
+      case "COUNTA": return flat().filter((v) => v !== "").length;
+      case "PRODUCT": return numArgs().reduce((s, x) => s * x, 1);
+      case "IF": return truthy(arg(0)) ? arg(1) : args.length > 2 ? arg(2) : false;
+      case "IFERROR":
+        try { return arg(0); } catch (e) { if (e instanceof FErr) return arg(1); throw e; }
+      case "AND": return flat().every(truthy);
+      case "OR": return flat().some(truthy);
+      case "NOT": return !truthy(arg(0));
+      case "ROUND": { const f = Math.pow(10, num(arg(1))); return Math.round(num(arg(0)) * f) / f; }
+      case "FLOOR": return Math.floor(num(arg(0)));
+      case "CEILING": return Math.ceil(num(arg(0)));
+      case "ABS": return Math.abs(num(arg(0)));
+      case "SQRT": { const x = num(arg(0)); if (x < 0) throw new FErr("#NUM!"); return Math.sqrt(x); }
+      case "POWER": return Math.pow(num(arg(0)), num(arg(1)));
+      case "MOD": { const d = num(arg(1)); if (d === 0) throw new FErr("#DIV/0!"); return num(arg(0)) % d; }
+      case "CONCAT": case "CONCATENATE": return flat().map(str).join("");
+      case "LEN": return str(arg(0)).length;
+      case "UPPER": return str(arg(0)).toUpperCase();
+      case "LOWER": return str(arg(0)).toLowerCase();
+      case "TRIM": return str(arg(0)).trim().replace(/\s+/g, " ");
+      case "LEFT": return str(arg(0)).slice(0, args.length > 1 ? num(arg(1)) : 1);
+      case "RIGHT": { const s = str(arg(0)); const n = args.length > 1 ? num(arg(1)) : 1; return n ? s.slice(-n) : ""; }
+      case "MID": return str(arg(0)).substr(num(arg(1)) - 1, num(arg(2)));
+      case "TODAY": return new Date().toISOString().slice(0, 10);
+      case "NOW": return new Date().toLocaleString();
+      case "COUNTIF": {
+        const test = criteria(arg(1));
+        const v = evaluate(args[0]);
+        return (Array.isArray(v) ? v : [v]).filter(test).length;
+      }
+      case "SUMIF": {
+        const test = criteria(arg(1));
+        const range = evaluate(args[0]);
+        const r = Array.isArray(range) ? range : [range];
+        const sumV = args[2] ? evaluate(args[2]) : r;
+        const s = Array.isArray(sumV) ? sumV : [sumV];
+        return r.reduce<number>((acc, v, i) => (test(v) && typeof s[i] === "number" ? acc + (s[i] as number) : acc), 0);
+      }
+      default: throw new FErr("#NAME?");
+    }
+  }
+
+  return value;
+}
