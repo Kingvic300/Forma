@@ -14,3 +14,14 @@ box in the top-left corner (or `Ctrl+1` … `Ctrl+6`), like the app switcher in 
 
 Everything is stored on your computer. Nothing is sent anywhere, except the update check
 against this repository's GitHub Releases.
+
+## Installing
+
+Download the file for your system from the [latest release](https://github.com/Kingvic300/Forma/releases/latest):
+
+- **Linux**: `.deb` (`sudo apt install ./Forma_*.deb`), `.AppImage` (`chmod +x`, then run) or `.rpm`
+- **macOS**: `.dmg`. The builds are not notarized yet: on first launch, right-click the app and choose **Open**.
+- **Windows**: `-setup.exe`. If SmartScreen warns, choose **More info → Run anyway**.
+
+You only install once. Forma checks for a new version in the background, downloads it, and asks
+you to restart. Updates are signed; the app only installs updates signed with the project's key.
