@@ -180,3 +180,12 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; background
 .sb-progress svg { width: 12px; height: 12px; }
 .bar-mini { width: 60px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .bar-mini span { display: block; height: 100%; background: var(--cyan); }
+
+.switcher { position: absolute; left: 0; top: 50px; z-index: 60; width: 420px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 6px; background: var(--raised); border-radius: var(--r); box-shadow: var(--pop); }
+.switcher button { height: auto; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 10px 10px; background: transparent; border-color: transparent; box-shadow: none; text-align: left; border-radius: 6px; }
+.switcher button:hover:not(:disabled), .switcher button:focus-visible { background: var(--hover); border-color: transparent; box-shadow: none; }
+.switcher button.on, .switcher button.on:hover:not(:disabled) { background: var(--active); color: var(--text); }
+.switcher .app-icon { margin-bottom: 6px; }
+.sw-name { font-size: 13px; font-weight: 600; }
+.sw-blurb { font-size: 11.5px; font-weight: 450; color: var(--text-3); white-space: normal; line-height: 1.35; min-height: 31px; }
+.switcher .key { margin-top: 4px; }
