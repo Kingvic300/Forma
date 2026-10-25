@@ -31,3 +31,17 @@ export async function saveAs(filename: string, content: Uint8Array | string): Pr
 }
 
 export const safeName = (name: string) => name.replace(/[\\/:*?"<>|]+/g, "_").trim() || "Untitled";
+
+/** Files passed on the command line or via "Open with Forma" from the OS. */
+export async function takeLaunchFiles(): Promise<File[]> {
+  if (!isTauri) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  const list = await invoke<{ name: string; bytes: number[] }[]>("take_opened_files");
+  return list.map((f) => new File([new Uint8Array(f.bytes)], f.name));
+}
+
+export async function onFilesOpened(cb: () => void) {
+  if (!isTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("files-opened", cb);
+}
