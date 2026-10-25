@@ -106,3 +106,37 @@ button.icon:hover:not(:disabled) { background: var(--hover); border-color: trans
 button.icon.round { width: 30px; padding: 0; }
 button.link { background: none; border: 0; box-shadow: none; height: auto; padding: 0; color: var(--cyan); }
 button.link:hover:not(:disabled) { background: none; text-decoration: underline; text-underline-offset: 3px; }
+input, select, textarea {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--well);
+  outline: none;
+  font-size: 13px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+textarea { height: auto; padding: 7px 9px; line-height: 1.5; }
+input:hover, select:hover, textarea:hover { border-color: #444444; }
+input:focus, select:focus, textarea:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(60, 200, 220, 0.18); }
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+input[type="checkbox"], input[type="radio"] { width: 15px; height: 15px; padding: 0; accent-color: var(--cyan); box-shadow: none; }
+input[type="color"] { padding: 0; }
+input[type="search"]::-webkit-search-cancel-button { filter: invert(0.7); }
+select option { background: var(--raised); color: var(--text); }
+.key {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  height: 18px; min-width: 18px; padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px; background: rgba(255, 255, 255, 0.05);
+  font: 600 10.5px/1 var(--sans); color: var(--text-3); white-space: nowrap;
+}
+.key svg { width: 11px; height: 11px; }
+.muted { color: var(--text-2); }
+.small { font-size: 12.5px; }
+.grow { flex: 1; }
+.sep { width: 1px; height: 18px; flex: none; background: var(--line); margin: 0 6px; }
+.check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12.5px; color: var(--text-2); }
+.loading { flex: 1; display: grid; place-items: center; color: var(--text-3); padding: 48px; }
+.loading svg { width: 20px; height: 20px; }
+
+.app-icon { display: inline-grid; place-items: center; flex: none; border-radius: 28%; background: color-mix(in srgb, var(--ac) 15%, transparent); color: var(--ac); }
