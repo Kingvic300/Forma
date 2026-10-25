@@ -12,6 +12,7 @@
     "dialog:allow-message",
     "dialog:allow-confirm",
     "fs:allow-write-file",
+    "opener:default",
     "updater:default",
     "process:allow-restart"
   ]

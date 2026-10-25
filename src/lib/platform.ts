@@ -36,6 +36,14 @@ export async function saveAs(filename: string, content: Uint8Array | string): Pr
 
 export const safeName = (name: string) => name.replace(/[\\/:*?"<>|]+/g, "_").trim() || "Untitled";
 
+/** Open a web page or email address in the user's default app. Callers check the scheme. */
+export async function openExternal(href: string) {
+  if (isTauri) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(href);
+  } else window.open(href, "_blank", "noopener,noreferrer");
+}
+
 /** Files passed on the command line or via "Open with Forma" from the OS. */
 export async function takeLaunchFiles(): Promise<File[]> {
   if (!isTauri) return [];
