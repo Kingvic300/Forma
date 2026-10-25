@@ -108,3 +108,34 @@ export function Menu({ label, children, align = "right" }: { label: ReactNode; c
     </div>
   );
 }
+
+/** The header of every open file: App / file name, save state, and the app's actions. */
+export function TitleBar({ meta, onRename, saved, app, children }: { meta: Meta; onRename: (n: string) => void; saved: boolean; app: AppId; children?: ReactNode }) {
+  const name = APPS.find((a) => a.id === app)!.name;
+  return (
+    <div className="titlebar">
+      <button className="crumb" title={`All ${name.toLowerCase()} files`} onClick={() => go(`/${app}`)}>
+        <AppIcon app={app} size={20} />
+        {name}
+      </button>
+      <span className="slash">/</span>
+      <input className="title" value={meta.name} aria-label="File name" onChange={(e) => onRename(e.target.value)} spellCheck={false} size={Math.max(8, meta.name.length + 1)} />
+      <span className={"saved" + (saved ? "" : " busy")}>
+        {saved ? <Check /> : <Loader2 className="spin" />}
+        {saved ? "Saved" : "Saving"}
+      </span>
+      <span className="grow" />
+      {children}
+    </div>
+  );
+}
+
+export function Missing({ app }: { app: AppId }) {
+  return (
+    <div className="empty-state">
+      <h2>This file is gone</h2>
+      <p>It was deleted, or it was never saved on this computer.</p>
+      <button className="primary" onClick={() => go(`/${app}`)}>Back to {APPS.find((a) => a.id === app)!.name}</button>
+    </div>
+  );
+}
