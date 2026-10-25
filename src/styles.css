@@ -198,3 +198,27 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; background
 .menu-pop.left { left: 0; }
 .menu-pop button { justify-content: flex-start; gap: 9px; height: 30px; padding: 0 8px; background: transparent; border-color: transparent; box-shadow: none; color: var(--text); font-weight: 450; font-size: 13px; border-radius: 5px; }
 .menu-pop button:hover:not(:disabled) { background: var(--active); border-color: transparent; }
+
+/* Dialogs */
+.modal-back { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.7); animation: fade-in 120ms; }
+.modal { width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 20px; background: var(--panel); border-radius: var(--r-lg); box-shadow: var(--pop); animation: pop-in 160ms var(--ease); }
+.modal.wide { width: min(680px, 100%); }
+.modal-head { display: flex; align-items: center; margin: -4px -6px -4px 0; }
+.modal-head h2, .modal.dialog h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 650; }
+.modal p { margin: 0; line-height: 1.55; }
+.modal-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.modal > .seg { align-self: flex-start; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.field input { height: 32px; }
+.about { display: flex; align-items: center; gap: 14px; }
+.about-name { font-size: 14px; font-weight: 650; }
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; background: var(--well); border: 1px solid var(--line); border-radius: var(--r); }
+.setting-title { font-weight: 550; margin-bottom: 2px; }
+.switch { position: relative; flex: none; width: 34px; height: 20px; cursor: pointer; }
+.switch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 10px; background: var(--line-strong); transition: background-color 140ms; pointer-events: none; }
+.switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #ededed; transition: transform 140ms var(--ease); }
+.switch input:checked + span { background: var(--cyan); }
+.switch input:checked + span::after { transform: translateX(14px); background: var(--cyan-ink); }
+.switch input:focus-visible + span { box-shadow: var(--ring); }
+.switch input:disabled + span { opacity: 0.45; }
