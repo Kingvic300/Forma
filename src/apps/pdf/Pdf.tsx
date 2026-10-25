@@ -12,7 +12,8 @@ import { Missing, TitleBar } from "../../ui";
 import { rasterizePage } from "./redact";
 import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields, type FieldInfo } from "./exportPdf";
 import { imageToPng, SignaturePad } from "./SignaturePad";
-import { CSS_FONT, type Ann, type Font, type PdfData } from "./types";
+import { isBoldName, matchFont } from "./fonts";
+import { CSS_FONT, FONT_LABEL, type Ann, type Font, type PdfData, type Span } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -38,6 +39,95 @@ async function pageText(doc: PDFDocumentProxy, index: number): Promise<TextRun[]
     runs.push({ x: m[4], top: m[5] - ascent * size, w: item.width, h: (ascent - descent) * size, baseline: m[5], size, str: item.str, fontName: item.fontName, family: style.fontFamily ?? "" });
   }
   return runs;
+}
+
+const BULLET = /^\s*([•▪◦‣∙·\-–—*]|\d{1,2}[.)])\s/;
+
+/**
+ * The block of text a click belongs to: the run's whole line (fragments split by bold or
+ * style changes), plus the following lines of the same paragraph — same size, same spacing,
+ * lined up with the first line. A new bullet starts a new block.
+ */
+function blockAt(all: TextRun[], hit: TextRun) {
+  const size = hit.size;
+  const same = (r: TextRun) => Math.abs(r.size - size) < size * 0.06;
+  const lineOf = (seed: TextRun) => {
+    const row = all.filter((r) => same(r) && Math.abs(r.baseline - seed.baseline) < size * 0.3).sort((a, b) => a.x - b.x);
+    let lo = row.indexOf(seed);
+    let hi = lo;
+    while (lo > 0 && row[lo].x - (row[lo - 1].x + row[lo - 1].w) < size * 1.5) lo--;
+    while (hi < row.length - 1 && row[hi + 1].x - (row[hi].x + row[hi].w) < size * 1.5) hi++;
+    return row.slice(lo, hi + 1);
+  };
+  const text = (line: TextRun[]) =>
+    line.reduce((t, r, i) => {
+      if (!i) return r.str;
+      const gap = r.x - (line[i - 1].x + line[i - 1].w);
+      return t + (gap > size * 0.12 && !/\s$/.test(t) && !/^\s/.test(r.str) ? " " : "") + r.str;
+    }, "");
+  const lines = [lineOf(hit)];
+  // After a bullet, only lines indented like the bullet's text belong to it.
+  const bullet = BULLET.test(text(lines[0]));
+  const anchors = bullet ? lines[0].slice(1, 2).map((r) => r.x) : lines[0].map((r) => r.x);
+  const aligned = (line: TextRun[]) =>
+    anchors.length
+      ? anchors.some((x) => Math.abs(line[0].x - x) < size * 0.25)
+      : line[0].x > lines[0][0].x + size * 0.4 && line[0].x < lines[0][0].x + size * 3;
+  const step = (from: TextRun[], dir: 1 | -1) => {
+    const b = from[0].baseline;
+    const near = all
+      .filter((r) => same(r) && (dir > 0 ? r.baseline > b + size * 0.8 && r.baseline < b + size * 2.2 : r.baseline < b - size * 0.8 && r.baseline > b - size * 2.2))
+      .sort((p, q) => dir * (p.baseline - q.baseline) || p.x - q.x);
+    return near.length ? lineOf(near[0]) : null;
+  };
+  let lead = 0;
+  for (let cur = lines[0]; ; ) {
+    const next = step(cur, 1);
+    if (!next || !aligned(next) || BULLET.test(text(next))) break;
+    const d = next[0].baseline - cur[0].baseline;
+    if (lead && Math.abs(d - lead) > size * 0.2) break;
+    lead = d;
+    lines.push(next);
+    cur = next;
+  }
+  if (!bullet) {
+    for (let cur = lines[0]; ; ) {
+      const prev = step(cur, -1);
+      if (!prev || !aligned(prev)) break;
+      const d = cur[0].baseline - prev[0].baseline;
+      if (lead && Math.abs(d - lead) > size * 0.2) break;
+      lead = d;
+      lines.unshift(prev);
+      cur = prev;
+      if (BULLET.test(text(prev))) break;
+    }
+  }
+  const runs = lines.flat();
+  const x0 = Math.min(...runs.map((r) => r.x));
+  const top = Math.min(...runs.map((r) => r.top));
+  return {
+    runs,
+    lines,
+    gapBefore: (line: TextRun[], i: number) => i > 0 && line[i].x - (line[i - 1].x + line[i - 1].w) > size * 0.12,
+    text: lines.map(text).join("\n"),
+    x: Math.min(...lines[0].map((r) => r.x)),
+    baseline: lines[0][0].baseline,
+    lead: lead || size * 1.2,
+    box: { x: x0, y: top, w: Math.max(...runs.map((r) => r.x + r.w)) - x0, h: Math.max(...runs.map((r) => r.top + r.h)) - top },
+  };
+}
+
+/** Where the first baseline sits in a text box drawn with this font, size and line spacing. */
+function measureBaseline(font: Font, bold: boolean, size: number, lead: number) {
+  const box = document.createElement("div");
+  box.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font-size:100px;line-height:${(100 * lead) / size}px;font-family:${CSS_FONT[font]};font-weight:${bold ? 700 : 400}`;
+  const mark = document.createElement("span");
+  mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+  box.append("Hg", mark);
+  document.body.append(box);
+  const ratio = mark.offsetTop / 100;
+  box.remove();
+  return ratio * size;
 }
 
 /** The run under a point, or the nearest one within a few points. */
@@ -175,30 +265,57 @@ export default function Pdf({ id }: { id: string }) {
   }
 
   /** Turn a line already on the page into editable text: hide it under white and type over it. */
-  async function editRun(page: number, run: TextRun) {
-    let name = "";
+  async function editRun(page: number, run: TextRun, all: TextRun[]) {
+    const block = blockAt(all, run);
+    const nameOf = new Map<string, string>();
     try {
       const p = doc ? await doc.getPage(page + 1) : null;
-      name = p?.commonObjs.has(run.fontName) ? (p.commonObjs.get(run.fontName)?.name ?? "") : "";
+      for (const r of block.runs) if (p?.commonObjs.has(r.fontName)) nameOf.set(r.fontName, p.commonObjs.get(r.fontName)?.name ?? "");
     } catch {
       // Font details are only a hint for matching the style.
     }
-    const font: Font = /mono/i.test(run.family) || /courier|mono|consol/i.test(name)
-      ? "courier"
-      : (/serif/i.test(run.family) && !/sans/i.test(run.family)) || (/times|georgia|garamond|cambria|serif/i.test(name) && !/sans/i.test(name))
-        ? "times"
-        : "helv";
-    const pad = run.size * 0.08;
-    const cover: Ann = { id: uid(), page, type: "whiteout", x: run.x - pad, y: run.top - pad, w: run.w + pad * 2, h: run.h + pad * 2, color: "#ffffff" };
+    const name = (r: TextRun) => nameOf.get(r.fontName) ?? "";
+    const font = matchFont(name(run), run.family);
+    // Keep bold words bold: each line becomes pieces of one weight.
+    const spans: Span[][] = block.lines.map((line) => {
+      const out: Span[] = [];
+      line.forEach((r, i) => {
+        const b = isBoldName(name(r));
+        const t = (block.gapBefore(line, i) && !/\s$/.test(out[out.length - 1]?.t ?? "") && !/^\s/.test(r.str) ? " " : "") + r.str;
+        const last = out[out.length - 1];
+        if (last && !!last.b === b) last.t += t;
+        else out.push({ t, b });
+      });
+      return out;
+    });
+    const bold = spans.every((l) => l.every((x) => x.b));
+    const size = Math.round(run.size * 10) / 10;
+    await document.fonts.load(`${bold ? 700 : 400} 20px ${CSS_FONT[font]}`).catch(() => {});
+    await document.fonts.load(`700 20px ${CSS_FONT[font]}`).catch(() => {});
+    const bl = measureBaseline(font, bold, size, block.lead);
+    const pad = size * 0.1;
+    const cover: Ann = { id: uid(), page, type: "whiteout", x: block.box.x - pad, y: block.box.y - pad, w: block.box.w + pad * 2, h: block.box.h + pad * 2, color: "#ffffff" };
     const text: Ann = {
-      id: uid(), page, type: "text", x: run.x, y: run.baseline - 0.93 * run.size, w: 0, h: 0, text: run.str,
-      size: Math.round(run.size * 10) / 10, font, bold: /bold|black|heavy|semibold|demi/i.test(name), color: "#000000", cover: cover.id,
+      id: uid(), page, type: "text", x: block.x, y: block.baseline - bl, w: 0, h: 0, text: block.text, spans,
+      size, font, bold, color: "#000000", cover: cover.id, bl, lead: block.lead,
     };
     f.setData((d) => ({ ...d, anns: [...d.anns, cover, text] }));
     setSelected(text.id);
     setFocusText(text.id);
   }
+
   const sel = data.anns.find((a) => a.id === selected);
+
+  /** Change font, size or weight, keeping edited text on its original baseline and spacing. */
+  function restyle(a: Ann, patch: Partial<Ann>) {
+    const next = { ...a, ...patch };
+    if (a.bl === undefined) return update(a.id, patch);
+    const k = (next.size ?? 14) / (a.size ?? 14);
+    const lead = (a.lead ?? (a.size ?? 14) * 1.2) * k;
+    const bl = measureBaseline(next.font ?? "helv", !!next.bold, next.size ?? 14, lead);
+    const baseline = a.y + a.bl;
+    update(a.id, { ...patch, lead, bl, y: baseline - bl });
+  }
 
   function pickTool(t: Tool) {
     setSelected(null);
@@ -302,15 +419,13 @@ export default function Pdf({ id }: { id: string }) {
           {sel.type !== "image" && sel.type !== "redact" && <label className="color" title="Color">Color <input type="color" value={sel.color ?? "#000000"} onChange={(e) => update(sel.id, { color: e.target.value })} /></label>}
           {sel.type === "text" && (
             <>
-              <select value={sel.font ?? "helv"} onChange={(e) => update(sel.id, { font: e.target.value as Font })}>
-                <option value="helv">Helvetica</option>
-                <option value="times">Times</option>
-                <option value="courier">Courier</option>
+              <select value={sel.font ?? "helv"} onChange={(e) => restyle(sel, { font: e.target.value as Font })}>
+                {(Object.keys(FONT_LABEL) as Font[]).map((k) => <option key={k} value={k}>{FONT_LABEL[k]}</option>)}
               </select>
-              <select value={sel.size ?? 14} onChange={(e) => update(sel.id, { size: Number(e.target.value) })}>
+              <select value={sel.size ?? 14} onChange={(e) => restyle(sel, { size: Number(e.target.value) })}>
                 {[...new Set([8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 64, sel.size ?? 14])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
               </select>
-              <button className={sel.bold ? "on" : ""} onClick={() => update(sel.id, { bold: !sel.bold })}><b>B</b></button>
+              <button className={sel.bold ? "on" : ""} onClick={() => restyle(sel, { bold: !sel.bold })}><b>B</b></button>
             </>
           )}
           <button onClick={() => add({ ...sel, x: sel.x + 12, y: sel.y + 12 })}>Duplicate</button>
@@ -360,7 +475,7 @@ export default function Pdf({ id }: { id: string }) {
                   onDraw={(r) => add({ page: i, type: tool as Ann["type"], ...r, color: tool === "highlight" ? "#ffeb3b" : tool === "whiteout" ? "#ffffff" : tool === "rect" ? "#e53935" : "#000000" })}
                   onChange={update}
                   onRemove={remove}
-                  onEditRun={(run) => editRun(i, run)}
+                  onEditRun={(run, all) => editRun(i, run, all)}
                   focusText={focusText}
                 />
               </div>
@@ -425,7 +540,7 @@ function PageView(props: {
   onDraw: (r: { x: number; y: number; w: number; h: number }) => void;
   onChange: (id: string, patch: Partial<Ann>) => void;
   onRemove: (id: string) => void;
-  onEditRun: (run: TextRun) => void;
+  onEditRun: (run: TextRun, all: TextRun[]) => void;
   focusText: string | null;
 }) {
   const { doc, index, size, scale, tool } = props;
@@ -491,7 +606,7 @@ function PageView(props: {
         if (tool === "edit") {
           e.preventDefault(); // otherwise the mousedown that follows takes focus away from the new text
           const run = runs.current && runAt(runs.current, p.x, p.y);
-          return run ? props.onEditRun(run) : undefined;
+          return run ? props.onEditRun(run, runs.current!) : undefined;
         }
         if (DRAG_TOOLS.includes(tool)) {
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -504,7 +619,7 @@ function PageView(props: {
         if (tool !== "select" || (e.target !== e.currentTarget && e.target !== canvas.current)) return;
         const r = wrap.current!.getBoundingClientRect();
         const run = runs.current && runAt(runs.current, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale);
-        if (run) props.onEditRun(run);
+        if (run) props.onEditRun(run, runs.current!);
       }}
       onPointerUp={() => {
         if (!draft) return;
@@ -543,6 +658,38 @@ function PageView(props: {
   );
 }
 
+const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const spansToHtml = (lines: Span[][]) => lines.map((l) => l.map((x) => (x.b ? `<b>${esc(x.t)}</b>` : esc(x.t))).join("")).join("\n");
+
+/** Read an edited box back into lines of bold / normal pieces (Ctrl+B adds <b>; Enter adds <br> or <div>). */
+function readSpans(root: HTMLElement): Span[][] {
+  const lines: Span[][] = [[]];
+  const push = (t: string, b: boolean) => {
+    const line = lines[lines.length - 1];
+    const last = line[line.length - 1];
+    if (last && !!last.b === b) last.t += t;
+    else line.push({ t, b });
+  };
+  const walk = (n: Node, b: boolean) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      (n.nodeValue ?? "").split("\n").forEach((part, i) => {
+        if (i) lines.push([]);
+        if (part) push(part, b);
+      });
+      return;
+    }
+    if (!(n instanceof HTMLElement)) return;
+    if (n.tagName === "BR") return void lines.push([]);
+    const bold = b || /^(B|STRONG)$/.test(n.tagName) || Number(n.style.fontWeight) >= 600 || n.style.fontWeight === "bold";
+    const block = n.tagName === "DIV" || n.tagName === "P";
+    if (block && lines[lines.length - 1].length) lines.push([]);
+    n.childNodes.forEach((c) => walk(c, bold));
+  };
+  root.childNodes.forEach((c) => walk(c, false));
+  while (lines.length > 1 && !lines[lines.length - 1].length) lines.pop();
+  return lines;
+}
+
 function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void }) {
   const [live, setLive] = useState<Partial<Ann> | null>(null); // position/size while dragging
   const text = useRef<HTMLDivElement>(null);
@@ -550,7 +697,8 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
 
   useEffect(() => {
     if (a.type !== "text" || !text.current) return;
-    text.current.innerText = a.text ?? "";
+    if (a.spans) text.current.innerHTML = spansToHtml(a.spans);
+    else text.current.innerText = a.text ?? "";
     if (!a.text || focus) {
       text.current.focus();
       // Caret at the end, ready to change the words.
@@ -602,8 +750,12 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
           contentEditable
           suppressContentEditableWarning
           spellCheck={false}
-          style={{ fontSize: (a.size ?? 14) * scale, fontFamily: CSS_FONT[a.font ?? "helv"], color: a.color, fontWeight: a.bold ? 700 : 400 }}
-          onInput={(e) => onChange({ text: e.currentTarget.innerText.replace(/\n$/, "") })}
+          style={{ fontSize: (a.size ?? 14) * scale, lineHeight: a.lead ? `${a.lead * scale}px` : undefined, fontFamily: CSS_FONT[a.font ?? "helv"], color: a.color, fontWeight: a.bold ? 700 : 400 }}
+          onInput={(e) => {
+            if (!a.spans) return onChange({ text: e.currentTarget.innerText.replace(/\n$/, "") });
+            const spans = readSpans(e.currentTarget);
+            onChange({ spans, text: spans.map((l) => l.map((x) => x.t).join("")).join("\n") });
+          }}
           onFocus={onSelect}
           onBlur={(e) => !e.currentTarget.innerText.trim() && !a.cover && onRemove()}
           onPointerDown={(e) => { e.stopPropagation(); onSelect(); }}
