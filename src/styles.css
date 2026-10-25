@@ -1,0 +1,74 @@
+/*
+ * Forma design system
+ *
+ * Near-black chrome (sidebar, status bar) around a true-black workspace. Cyan is reserved for
+ * focus, the current selection and the one primary action on screen; everything else is
+ * built from neutrals so documents and data stay the brightest things in the window.
+ * Each app has a quiet identity color used only on its icon.
+ *
+ * Type: Mona Sans (UI), JetBrains Mono (formulas, cell addresses, numbers in grids).
+ * Scale: 11.5 / 12.5 / 13 / 14 / 16 / 20.  Radii: 5 controls, 8 popovers, 12 dialogs.
+ */
+:root {
+  --chrome: #0a0a0a;
+  --chrome-line: #1c1c1c;
+  --bg: #000000;
+  --panel: #0d0d0d;
+  --raised: #171717;
+  --well: #050505;
+  --hover: rgba(255, 255, 255, 0.045);
+  --active: rgba(255, 255, 255, 0.08);
+  --line-soft: #161616;
+  --line: #222222;
+  --line-strong: #333333;
+  --text: #ededed;
+  --text-2: #a1a1a1;
+  --text-3: #6e6e6e;
+  --cyan: #3cc8dc;
+  --cyan-hover: #62d5e6;
+  --cyan-ink: #04171c;
+  --cyan-soft: rgba(60, 200, 220, 0.13);
+  --danger: #f0717a;
+  --danger-solid: #d9434d;
+  --ok: #4fbf8b;
+  --warn: #e2b25b;
+  --paper: #fbfbfa;
+  --paper-ink: #111111;
+  --r-sm: 5px;
+  --r: 8px;
+  --r-lg: 12px;
+  --pop: 0 0 0 1px var(--line-strong), 0 16px 40px -8px rgba(0, 0, 0, 0.9), 0 3px 8px rgba(0, 0, 0, 0.6);
+  --ring: 0 0 0 1px var(--bg), 0 0 0 3px rgba(60, 200, 220, 0.55);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sans: "Mona Sans Variable", "Mona Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+/* Base */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+input, textarea, [contenteditable], .selectable { user-select: text; }
+::selection { background: rgba(60, 200, 220, 0.3); }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb { background: #2b2b2b; border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: #3d3d3d; }
+::-webkit-scrollbar-corner, ::-webkit-scrollbar-track { background: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.985); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shimmer { from { background-position: -200px 0; } to { background-position: 200px 0; } }
+.spin { animation: spin 0.9s linear infinite; }
+.pop { animation: pop-in 140ms var(--ease); transform-origin: top; }
