@@ -55,38 +55,29 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      { "ext": ["pdf"], "name": "PDF document", "role": "Editor", "mimeType": "application/pdf" },
+      { "ext": ["csv", "tsv"], "name": "CSV spreadsheet", "role": "Editor", "mimeType": "text/csv" },
+      { "ext": ["xlsx", "xls", "ods"], "name": "Spreadsheet", "role": "Editor" },
+      { "ext": ["docx"], "name": "Word document", "role": "Editor" }
+    ],
     "linux": {
       "deb": {
-        "depends": [
-          "libwebkit2gtk-4.1-0",
-          "libgtk-3-0"
-        ],
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"],
         "section": "utils"
       },
-      "appimage": {
-        "bundleMediaFramework": false
-      }
+      "appimage": { "bundleMediaFramework": false }
     },
-    "macOS": {
-      "minimumSystemVersion": "11.0"
-    },
-    "windows": {
-      "nsis": {
-        "installMode": "currentUser"
-      }
-    },
+    "macOS": { "minimumSystemVersion": "11.0" },
+    "windows": { "nsis": { "installMode": "currentUser" } },
     "homepage": "https://github.com/Kingvic300/Forma",
     "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFODlGRDUzRDlFMzlBMTEKUldRUm11UFpVLzJKM3JWZUtZUDAxTjFLUTRtUytBYnI3Um9aaUtPY296Z2liZmw3bEMreklicU4K",
-      "endpoints": [
-        "https://github.com/Kingvic300/Forma/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
+      "endpoints": ["https://github.com/Kingvic300/Forma/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   }
 }
