@@ -4,11 +4,12 @@
  * built into the app, so only releases signed with the project's private key can install.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, RefreshCw, X } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import { isTauri } from "./lib/platform";
 import { getSetting } from "./lib/store";
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const INSTALL_DELAY_MS = 5000; // long enough to read the banner, short enough to feel automatic
 const RETRY_AFTER_FAILURE_MS = 10 * 60 * 1000; // GitHub can be unreachable on patchy connections
 
 export type UpdateState =
@@ -60,7 +61,7 @@ export function useUpdater() {
             setState({ kind: "downloading", version: update.version, progress: total ? Math.round((100 * done) / total) : null });
           }
         },
-        { timeout: 15 * 60_000 },
+        { timeout: 5 * 60_000 },
       );
       pending.current = update;
       setState({ kind: "ready", version: update.version, notes: update.body });
@@ -82,6 +83,15 @@ export function useUpdater() {
     await relaunch();
   }, []);
 
+  // Once an update is downloaded, install it and reopen Forma without asking.
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    const timer = window.setTimeout(() => {
+      restart().catch((e) => setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }));
+    }, INSTALL_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [state.kind, restart]);
+
   useEffect(() => {
     if (!isTauri) return;
     let timer: number | undefined;
@@ -100,14 +110,13 @@ export function useUpdater() {
 /** Banner shown once an update has been downloaded. */
 export function UpdateBanner({ updater }: { updater: ReturnType<typeof useUpdater> }) {
   const { state, setState, restart } = updater;
-  const [dismissed, setDismissed] = useState(false);
   const [installing, setInstalling] = useState(false);
-  if (state.kind !== "ready" || dismissed) return null;
+  if (state.kind !== "ready") return null;
   return (
     <div role="status" className="update-banner">
       <Download />
       <span>
-        Forma {state.version} is ready. <span className="muted">Restart to finish updating.</span>
+        Forma {state.version} is ready. <span className="muted">Restarting to finish updating…</span>
       </span>
       <button
         className="primary"
@@ -124,7 +133,6 @@ export function UpdateBanner({ updater }: { updater: ReturnType<typeof useUpdate
       >
         <RefreshCw /> {installing ? "Installing…" : "Restart now"}
       </button>
-      <button className="icon" aria-label="Later" onClick={() => setDismissed(true)}><X /></button>
     </div>
   );
 }

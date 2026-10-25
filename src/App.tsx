@@ -276,7 +276,7 @@ function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<
       <section className="setting">
         <div>
           <div className="setting-title">Automatic updates</div>
-          <div className="muted small">Download new versions in the background, then ask before restarting.</div>
+          <div className="muted small">Download new versions in the background, then restart to install them.</div>
         </div>
         <label className="switch">
           <input type="checkbox" role="switch" checked={auto} disabled={!isTauri} onChange={(e) => { setAuto(e.target.checked); setSetting("autoUpdate", e.target.checked); }} />
@@ -296,7 +296,7 @@ function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<
             {s.kind === "checking" && "Checking for updates…"}
             {s.kind === "latest" && "You’re on the latest version."}
             {s.kind === "downloading" && `Downloading ${s.version}${s.progress !== null ? `, ${s.progress}%` : ""}…`}
-            {s.kind === "ready" && `Version ${s.version} is downloaded.`}
+            {s.kind === "ready" && `Version ${s.version} is downloaded. Restarting…`}
             {s.kind === "error" && `Update failed: ${s.message}`}
           </span>
           <span className="grow" />
