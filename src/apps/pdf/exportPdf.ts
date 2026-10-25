@@ -37,3 +37,85 @@ export async function readFields(bytes: Uint8Array): Promise<FieldInfo[]> {
     return [];
   }
 }
+
+/** Burn annotations and form values into a new PDF. */
+export async function buildPdf(data: PdfData): Promise<Uint8Array> {
+  const pdf = await PDFDocument.load(data.bytes, { ignoreEncryption: true });
+
+  if (Object.keys(data.fields).length) {
+    const form = pdf.getForm();
+    for (const [name, v] of Object.entries(data.fields)) {
+      try {
+        const f = form.getField(name);
+        if (f instanceof PDFTextField) f.setText(String(v));
+        else if (f instanceof PDFCheckBox) v ? f.check() : f.uncheck();
+        else if (f instanceof PDFDropdown && v) f.select(String(v));
+        else if (f instanceof PDFRadioGroup && v) f.select(String(v));
+      } catch {
+        // A field that can't take the value is left as it was.
+      }
+    }
+  }
+
+  const fonts = new Map<string, PDFFont>();
+  const font = async (f: Font = "helv", bold = false) => {
+    const k = f + bold;
+    if (!fonts.has(k)) fonts.set(k, await pdf.embedFont(FONT[f][bold ? 1 : 0]));
+    return fonts.get(k)!;
+  };
+  const images = new Map<string, Awaited<ReturnType<PDFDocument["embedPng"]>>>();
+
+  for (const a of data.anns) {
+    const page = pdf.getPage(a.page);
+    if (!page) continue;
+    const box = page.getCropBox();
+    const X = (x: number) => box.x + x;
+    const Y = (y: number) => box.y + box.height - y; // flip: PDF origin is bottom-left
+    draw(a);
+
+    async function drawText(a: Ann) {
+      const size = a.size ?? 14;
+      const f = await font(a.font, a.bold);
+      (a.text ?? "").split("\n").forEach((line, i) => {
+        page.drawText(latin1(line), { x: X(a.x), y: Y(a.y + i * size * 1.2 + size * 0.93), size, font: f, color: hex(a.color) });
+      });
+    }
+    function draw(a: Ann) {
+      switch (a.type) {
+        case "highlight":
+          page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, color: hex(a.color ?? "#ffeb3b"), opacity: 0.4 });
+          break;
+        case "whiteout":
+          page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, color: hex(a.color ?? "#ffffff") });
+          break;
+        case "rect":
+          page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, borderColor: hex(a.color ?? "#e53935"), borderWidth: 2 });
+          break;
+        case "line":
+          page.drawLine({ start: { x: X(a.x), y: Y(a.y + a.h / 2) }, end: { x: X(a.x + a.w), y: Y(a.y + a.h / 2) }, thickness: 1.5, color: hex(a.color) });
+          break;
+        case "check": {
+          const c = hex(a.color);
+          const t = Math.max(1.5, a.w / 9);
+          page.drawLine({ start: { x: X(a.x + a.w * 0.12), y: Y(a.y + a.h * 0.55) }, end: { x: X(a.x + a.w * 0.4), y: Y(a.y + a.h * 0.85) }, thickness: t, color: c });
+          page.drawLine({ start: { x: X(a.x + a.w * 0.4), y: Y(a.y + a.h * 0.85) }, end: { x: X(a.x + a.w * 0.9), y: Y(a.y + a.h * 0.15) }, thickness: t, color: c });
+          break;
+        }
+        case "cross": {
+          const c = hex(a.color);
+          const t = Math.max(1.5, a.w / 9);
+          page.drawLine({ start: { x: X(a.x + a.w * 0.15), y: Y(a.y + a.h * 0.15) }, end: { x: X(a.x + a.w * 0.85), y: Y(a.y + a.h * 0.85) }, thickness: t, color: c });
+          page.drawLine({ start: { x: X(a.x + a.w * 0.85), y: Y(a.y + a.h * 0.15) }, end: { x: X(a.x + a.w * 0.15), y: Y(a.y + a.h * 0.85) }, thickness: t, color: c });
+          break;
+        }
+      }
+    }
+    if (a.type === "text") await drawText(a);
+    if (a.type === "image" && a.src) {
+      let img = images.get(a.src);
+      if (!img) images.set(a.src, (img = await pdf.embedPng(a.src)));
+      page.drawImage(img, { x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h });
+    }
+  }
+  return pdf.save();
+}
