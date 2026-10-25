@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download Forma</title>
-<meta name="description" content="Forma is a free, open-source desktop app for documents, spreadsheets, forms, PDFs and personal tracking. It works offline. Download it for Linux, macOS or Windows.">
+<meta name="description" content="Forma is a free, open-source desktop app for documents, spreadsheets, PDFs and personal tracking. It works offline. Download it for Linux, macOS or Windows.">
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <style>
   @font-face {
@@ -25,7 +25,7 @@
   body { margin: 0; font: 15px/1.55 "Mona Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
   a { color: var(--cyan); }
   :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .wrap { width: 100%; max-width: 1760px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 96px); }
 
   .top { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 17px; color: var(--text); text-decoration: none; }
@@ -33,9 +33,9 @@
   nav a { color: var(--text-2); text-decoration: none; margin-left: 22px; font-size: 14px; }
   nav a:hover { color: var(--text); }
 
-  .hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; padding: 56px 0 80px; }
-  h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.06; letter-spacing: -.03em; margin: 0; font-weight: 680; max-width: 15ch; }
-  .lede { color: var(--text-2); font-size: 17px; max-width: 48ch; margin: 20px 0 30px; }
+  .hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: clamp(40px, 6vw, 120px); align-items: center; padding: 56px 0 80px; }
+  h1 { font-size: clamp(34px, 4.4vw, 68px); line-height: 1.06; letter-spacing: -.03em; margin: 0; font-weight: 680; max-width: 15ch; }
+  .lede { color: var(--text-2); font-size: clamp(16px, 1.15vw, 19px); max-width: 52ch; margin: 20px 0 30px; }
   .primary { display: inline-flex; align-items: center; gap: 10px; background: var(--cyan); color: var(--cyan-ink); font-weight: 650; padding: 13px 20px; border-radius: 9px; text-decoration: none; font-size: 16px; }
   .primary:hover { background: var(--cyan-hover); }
   .primary svg { width: 18px; height: 18px; }
@@ -129,15 +129,15 @@
 
   <div class="hero">
     <div>
-      <h1>Your documents, spreadsheets, forms and PDFs in one app.</h1>
-      <p class="lede">Write documents, open CSV and Excel files, collect form responses, fill and sign PDFs, and keep track of your tasks. Switch between them from one box at the top, the way you switch apps in Gmail. Everything stays on your computer and works offline.</p>
+      <h1>Your documents, spreadsheets and PDFs in one app.</h1>
+      <p class="lede">Write documents, open CSV and Excel files, edit, fill and sign PDFs, and keep track of your tasks. Switch between them from one box at the top, the way you switch apps in Gmail. Everything stays on your computer and works offline.</p>
       <a id="cta" class="primary" href="https://github.com/Kingvic300/Forma/releases/latest">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>
         <span id="cta-label">Download Forma</span>
       </a>
       <p class="meta" id="cta-meta">Free and open source. Linux, macOS and Windows.</p>
     </div>
-    <div class="switcher" aria-label="Forma's app switcher, showing its six apps">
+    <div class="switcher" aria-label="Forma's app switcher, showing its five apps">
       <div class="switcher-box">
         <img src="logo.svg" alt="">
         <div><b>PDF</b><span>Forma</span></div>
@@ -147,9 +147,8 @@
         <div class="app" style="--c:#8d97ab"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-files"/></svg></div><b>Files</b><span>Everything you’ve made or opened</span><i class="key">Ctrl 1</i></div>
         <div class="app" style="--c:#7c9dff"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-docs"/></svg></div><b>Docs</b><span>Documents and letters</span><i class="key">Ctrl 2</i></div>
         <div class="app" style="--c:#4fbf8b"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-sheets"/></svg></div><b>Sheets</b><span>Spreadsheets, CSV and Excel</span><i class="key">Ctrl 3</i></div>
-        <div class="app" style="--c:#b195f5"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-forms"/></svg></div><b>Forms</b><span>Questions and responses</span><i class="key">Ctrl 4</i></div>
-        <div class="app on" style="--c:#f07a80"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-pdf"/></svg></div><b>PDF</b><span>Fill, sign and edit PDFs</span><i class="key">Ctrl 5</i></div>
-        <div class="app" style="--c:#e2b25b"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-tracker"/></svg></div><b>Tracker</b><span>Tasks, habits and notes</span><i class="key">Ctrl 6</i></div>
+        <div class="app on" style="--c:#f07a80"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-pdf"/></svg></div><b>PDF</b><span>Fill, sign and edit PDFs</span><i class="key">Ctrl 4</i></div>
+        <div class="app" style="--c:#e2b25b"><div class="icon"><svg viewBox="0 0 24 24"><use href="#i-tracker"/></svg></div><b>Tracker</b><span>Tasks, habits and notes</span><i class="key">Ctrl 5</i></div>
       </div>
     </div>
   </div>
@@ -171,12 +170,11 @@
 <section>
   <div class="wrap">
     <h2>What’s inside</h2>
-    <p class="sub">Six apps that share one window, one search (Ctrl+K) and one place for your files.</p>
+    <p class="sub">Five apps that share one window, one search (Ctrl+K) and one place for your files.</p>
     <div class="inside">
       <div class="item"><div class="icon" style="--c:#7c9dff"><svg viewBox="0 0 24 24"><use href="#i-docs"/></svg></div><div><b>Docs</b><span>Headings, lists, tables, images and links. Opens Word, HTML, text and Markdown files; saves as Word, HTML, text or PDF.</span></div></div>
       <div class="item"><div class="icon" style="--c:#4fbf8b"><svg viewBox="0 0 24 24"><use href="#i-sheets"/></svg></div><div><b>Sheets</b><span>Formulas such as SUM, AVERAGE, IF and COUNTIF, several sheets per file, sort and filter. Opens and saves CSV and Excel.</span></div></div>
-      <div class="item"><div class="icon" style="--c:#b195f5"><svg viewBox="0 0 24 24"><use href="#i-forms"/></svg></div><div><b>Forms</b><span>Nine question types. Share a link anyone can fill in from their phone, then see the answers as charts or open them in Sheets.</span></div></div>
-      <div class="item"><div class="icon" style="--c:#f07a80"><svg viewBox="0 0 24 24"><use href="#i-pdf"/></svg></div><div><b>PDF</b><span>Add text and dates, sign or initial, fill a PDF’s own form fields, highlight, black out private details, combine and reorder pages.</span></div></div>
+      <div class="item"><div class="icon" style="--c:#f07a80"><svg viewBox="0 0 24 24"><use href="#i-pdf"/></svg></div><div><b>PDF</b><span>Edit the words, add text and dates, sign or initial, fill a PDF’s own form fields, highlight, black out private details, combine and reorder pages.</span></div></div>
       <div class="item"><div class="icon" style="--c:#e2b25b"><svg viewBox="0 0 24 24"><use href="#i-tracker"/></svg></div><div><b>Tracker</b><span>Tasks with due dates and priority, daily habits with streaks, and a short note for each day.</span></div></div>
       <div class="item"><div class="icon" style="--c:#8d97ab"><svg viewBox="0 0 24 24"><use href="#i-files"/></svg></div><div><b>Files</b><span>Every file you’ve made or opened, with search. Drop files onto the window to open them.</span></div></div>
     </div>
@@ -187,7 +185,7 @@
   <div class="wrap facts">
     <div class="fact"><b>Works offline</b><span>Files are stored on your computer. There’s no Forma account or server.</span></div>
     <div class="fact"><b>Updates itself</b><span>Install once. Each update is signed and only installs if the signature checks out.</span></div>
-    <div class="fact"><b>No telemetry</b><span>No analytics or crash reports. Forma only goes online to check for updates, and to share forms if you choose to.</span></div>
+    <div class="fact"><b>No telemetry</b><span>No analytics or crash reports. The only network request is the update check.</span></div>
     <div class="fact"><b>Open source</b><span>MIT licensed. Read the code, report bugs or send improvements.</span></div>
   </div>
 </section>
