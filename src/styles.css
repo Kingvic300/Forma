@@ -435,3 +435,16 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .fill-foot { display: flex; align-items: center; justify-content: space-between; }
 .fill-foot .primary { height: 34px; padding: 0 22px; }
 .done { width: 100%; max-width: 720px; margin: 0 auto; }
+.resp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.resp-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.row { display: flex; gap: 8px; }
+.summary h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.summary .muted { font-size: 12.5px; margin-top: 2px; }
+.bars { display: flex; flex-direction: column; gap: 9px; margin-top: 16px; }
+.bar-row { display: grid; grid-template-columns: 180px 1fr 90px; gap: 12px; align-items: center; font-size: 12.5px; }
+.bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.bar { height: 8px; border-radius: 4px; background: var(--well); overflow: hidden; }
+.bar span { display: block; height: 100%; border-radius: 4px; background: var(--form); transition: width 300ms var(--ease); }
+.bar-n { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.answers { margin: 12px 0 0; padding: 0; list-style: none; max-height: 260px; overflow: auto; }
+.answers li { margin-bottom: 4px; padding: 7px 10px; background: var(--well); border: 1px solid var(--line-soft); border-radius: 6px; font-size: 13px; user-select: text; }
