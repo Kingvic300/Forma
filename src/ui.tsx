@@ -91,3 +91,20 @@ export function AppSwitcher({ current, open, setOpen, onPick }: { current: AppId
     </div>
   );
 }
+
+export function Menu({ label, children, align = "right" }: { label: ReactNode; children: ReactNode; align?: "left" | "right" }) {
+  const [open, setOpen] = useState(false);
+  const ref = useDismiss(open, setOpen);
+  return (
+    <div className="menu" ref={ref}>
+      <button aria-haspopup="menu" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
+        {label} <ChevronDown className="chev" />
+      </button>
+      {open && (
+        <div className={"menu-pop pop " + align} role="menu" onClick={() => setOpen(false)} onMouseDown={(e) => e.preventDefault()}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
