@@ -315,3 +315,10 @@ export function makeEvaluator(cells: string[][]) {
 
   return value;
 }
+
+export function display(v: Val | FErr): string {
+  if (v instanceof FErr) return v.code;
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(12)));
+  return v;
+}
