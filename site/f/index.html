@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Form</title>
+<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<style>
+  @font-face {
+    font-family: "Mona Sans";
+    src: url("../fonts/mona-sans-latin-wght-normal.woff2") format("woff2");
+    font-weight: 200 900;
+    font-display: swap;
+  }
+  :root {
+    --bg: #000; --panel: #0d0d0d; --raised: #171717; --well: #050505;
+    --line-soft: #161616; --line: #222; --line-strong: #333;
+    --text: #ededed; --text-2: #a1a1a1; --text-3: #6e6e6e;
+    --danger: #f0717a; --form: #b195f5;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--text); color-scheme: dark; }
+  body { margin: 0; font: 15px/1.55 "Mona Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 64px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
+  .head { border-top: 4px solid var(--form); }
+  h1 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -.02em; font-weight: 680; }
+  .desc { margin: 10px 0 0; color: var(--text-2); white-space: pre-wrap; }
+  .desc a, .help a { color: var(--form); }
+  .req-note { margin: 12px 0 0; font-size: 13px; color: var(--danger); }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend, .q-title { display: block; padding: 0; font-size: 16px; font-weight: 600; }
+  .req { color: var(--danger); }
+  .help { margin: 4px 0 0; font-size: 13.5px; color: var(--text-2); white-space: pre-wrap; }
+  .field { margin-top: 14px; }
+  input[type=text], input[type=email], input[type=number], input[type=date], textarea, select {
+    width: 100%; font: inherit; color: inherit; background: var(--well); border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; outline: none;
+  }
+  textarea { min-height: 96px; resize: vertical; }
+  input:focus, textarea:focus, select:focus { border-color: var(--form); box-shadow: 0 0 0 3px color-mix(in srgb, var(--form) 25%, transparent); }
+  .choices { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+  .choice { display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+  .choice:hover { background: var(--raised); }
+  .choice input { width: 18px; height: 18px; margin: 0; accent-color: var(--form); flex: none; }
+  .scale { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .scale label { flex: 1; min-width: 44px; display: grid; place-items: center; gap: 6px; padding: 10px 0; border-radius: 8px; border: 1px solid var(--line-strong); cursor: pointer; font-weight: 600; }
+  .scale input { position: absolute; opacity: 0; pointer-events: none; }
+  .scale label:has(input:checked) { background: var(--form); border-color: var(--form); color: #0b0b0b; }
+  .scale label:has(input:focus-visible) { outline: 2px solid var(--form); outline-offset: 2px; }
+  .invalid { border-color: color-mix(in srgb, var(--danger) 70%, transparent); }
+  .error { margin-top: 10px; font-size: 13.5px; color: var(--danger); }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
+  button { font: inherit; cursor: pointer; border-radius: 9px; }
+  .submit { background: var(--form); color: #0b0b0b; border: 0; padding: 12px 26px; font-weight: 650; font-size: 15px; }
+  .submit:disabled { opacity: .6; cursor: default; }
+  .clear { background: none; border: 0; color: var(--text-2); padding: 8px; text-decoration: underline; text-underline-offset: 3px; }
+  .state { text-align: center; padding: 40px 22px; }
+  .state h1 { font-size: 22px; }
+  .state p { color: var(--text-2); margin: 10px 0 0; }
+  .again { margin-top: 18px; background: var(--raised); color: var(--text); border: 1px solid var(--line-strong); padding: 10px 18px; }
+  .made { text-align: center; font-size: 12.5px; color: var(--text-3); margin-top: 18px; }
+  .made a { color: var(--text-2); }
+  .loading { color: var(--text-3); text-align: center; padding: 60px 0; }
+  :focus-visible { outline: 2px solid var(--form); outline-offset: 2px; }
+  @media (max-width: 480px) { main { padding-top: 16px; } .card { padding: 18px 16px; } h1 { font-size: 23px; } }
+</style>
+</head>
+<body>
+<main id="app"><p class="loading">Loading the form…</p></main>
+<script>
+(() => {
+  const app = document.getElementById("app");
+  const el = (tag, props = {}, ...children) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) n.setAttribute(k, v === true ? "" : v);
+    }
+    for (const c of children.flat()) if (c != null) n.append(c);
+    return n;
+  };
+  // Plain text with web and email addresses turned into links (no HTML from the form is trusted).
+  const LINK = /\b(?:https?:\/\/[^\s<>"']+|www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"']*|[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})/gi;
+  const linkify = (text) => {
+    const out = [];
+    let at = 0;
+    for (const m of text.matchAll(LINK)) {
+      const t = m[0].replace(/[.,;:!?)\]]+$/, "");
+      const href = /^https?:/i.test(t) ? t : t.includes("@") ? "mailto:" + t : "https://" + t;
+      out.push(text.slice(at, m.index), el("a", { href, target: "_blank", rel: "noopener noreferrer", text: t }));
+      at = m.index + t.length;
+    }
+    out.push(text.slice(at));
+    return out;
+  };
+  const show = (...nodes) => app.replaceChildren(...nodes, el("p", { class: "made" }, "Made with ", el("a", { href: "../", text: "Forma" }), ", a free app for documents, sheets, forms and PDFs."));
+  const message = (title, text) => show(el("div", { class: "card head state" }, el("h1", { text: title }), el("p", { text })));
+
+  let cfg;
+  try {
+    const raw = location.hash.slice(1).replace(/-/g, "+").replace(/_/g, "/");
+    cfg = JSON.parse(atob(raw));
+    const host = new URL(cfg.u).hostname;
+    if (!/\.supabase\.(co|in)$/.test(host) || new URL(cfg.u).protocol !== "https:" || typeof cfg.k !== "string" || typeof cfg.f !== "string") throw 0;
+  } catch {
+    return message("This link isn’t complete", "Ask the person who sent it to copy the link again from Forma.");
+  }
+
+  async function rpc(fn, args) {
+    const headers = { "Content-Type": "application/json", apikey: cfg.k };
+    if (cfg.k.startsWith("eyJ")) headers.Authorization = "Bearer " + cfg.k;
+    const res = await fetch(`${cfg.u}/rest/v1/rpc/${fn}`, { method: "POST", headers, body: JSON.stringify(args) });
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
+    if (!res.ok) throw new Error((body && body.message) || "Something went wrong. Please try again.");
+    return body;
+  }
+
+  function render(form) {
+    document.title = form.title || "Form";
+    if (form.color) document.documentElement.style.setProperty("--form", form.color);
+    const questions = Array.isArray(form.questions) ? form.questions : [];
+    const inputs = new Map();
+
+    const head = el("div", { class: "card head" },
+      el("h1", { text: form.title || "Untitled form" }),
+      form.description ? el("p", { class: "desc" }, linkify(form.description)) : null,
+      questions.some((q) => q.required) ? el("p", { class: "req-note", text: "* Required" }) : null);
+
+    const cards = questions.map((q, i) => {
+      const id = "q" + i;
+      const title = [q.label || "Untitled question", q.required ? el("span", { class: "req", "aria-hidden": "true", text: " *" }) : null];
+      const help = q.help ? el("p", { class: "help", id: id + "-help" }, linkify(q.help)) : null;
+      const error = el("p", { class: "error", id: id + "-err", role: "alert", hidden: true });
+      const describedBy = [q.help ? id + "-help" : "", id + "-err"].join(" ").trim();
+      let body, read;
+      if (q.type === "choice" || q.type === "checkbox") {
+        const type = q.type === "choice" ? "radio" : "checkbox";
+        const boxes = (q.options || []).map((o) => el("input", { type, name: id, value: o }));
+        body = el("fieldset", { "aria-describedby": describedBy }, el("legend", {}, title), help, el("div", { class: "choices" }, boxes.map((b) => el("label", { class: "choice" }, b, b.value))));
+        read = () => (type === "radio" ? (boxes.find((b) => b.checked) || {}).value || "" : boxes.filter((b) => b.checked).map((b) => b.value));
+      } else if (q.type === "scale") {
+        const boxes = ["1", "2", "3", "4", "5"].map((n) => el("input", { type: "radio", name: id, value: n, "aria-label": n }));
+        body = el("fieldset", { "aria-describedby": describedBy }, el("legend", {}, title), help, el("div", { class: "scale" }, boxes.map((b) => el("label", {}, b, b.value))));
+        read = () => (boxes.find((b) => b.checked) || {}).value || "";
+      } else {
+        let input;
+        if (q.type === "paragraph") input = el("textarea", { id, maxlength: 5000 });
+        else if (q.type === "dropdown") input = el("select", { id }, el("option", { value: "", text: "Choose" }), (q.options || []).map((o) => el("option", { value: o, text: o })));
+        else input = el("input", { id, type: { number: "number", email: "email", date: "date" }[q.type] || "text", maxlength: 1000, autocomplete: q.type === "email" ? "email" : "off" });
+        input.setAttribute("aria-describedby", describedBy);
+        if (q.required) input.setAttribute("aria-required", "true");
+        body = [el("label", { class: "q-title", for: id }, title), help, el("div", { class: "field" }, input)];
+        read = () => input.value.trim();
+      }
+      const card = el("div", { class: "card" }, body, error);
+      const clear = () => { error.hidden = true; card.classList.remove("invalid"); };
+      card.addEventListener("input", clear);
+      card.addEventListener("change", clear);
+      inputs.set(q.id, { q, read, card, error });
+      return card;
+    });
+
+    const submit = el("button", { class: "submit", type: "submit", text: "Submit" });
+    const formEl = el("form", { novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      const answers = {};
+      let first = null;
+      for (const [qid, { q, read, card, error }] of inputs) {
+        const v = read();
+        const empty = v === "" || (Array.isArray(v) && !v.length);
+        let problem = "";
+        if (q.required && empty) problem = "This question needs an answer.";
+        else if (q.type === "email" && !empty && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) problem = "Enter a valid email address.";
+        error.textContent = problem;
+        error.hidden = !problem;
+        card.classList.toggle("invalid", !!problem);
+        if (problem && !first) first = card;
+        if (!empty) answers[qid] = v;
+      }
+      if (first) return first.scrollIntoView({ behavior: "smooth", block: "center" });
+      submit.disabled = true;
+      submit.textContent = "Sending…";
+      try {
+        await rpc("forma_submit", { p_id: cfg.f, p_answers: answers });
+        app.replaceChildren();
+        show(el("div", { class: "card head state" },
+          el("h1", { text: form.title || "Thank you" }),
+          el("p", { text: "Your response has been recorded." }),
+          el("button", { class: "again", type: "button", text: "Submit another response", onclick: () => render(form) })));
+        scrollTo(0, 0);
+      } catch (err) {
+        submit.disabled = false;
+        submit.textContent = "Submit";
+        alertBox.textContent = err.message + " Your answers are still here.";
+        alertBox.hidden = false;
+      }
+    } },
+      head, cards,
+      el("div", { class: "foot" }, submit, el("button", { class: "clear", type: "reset", text: "Clear form", onclick: () => setTimeout(() => inputs.forEach(({ error, card }) => { error.hidden = true; card.classList.remove("invalid"); })) })));
+    const alertBox = el("p", { class: "error", role: "alert", hidden: true });
+    formEl.style.cssText = "display:flex;flex-direction:column;gap:12px";
+    show(formEl, alertBox);
+  }
+
+  rpc("forma_get_form", { p_id: cfg.f })
+    .then((form) => {
+      if (!form) return message("This form isn’t available", "It may have been removed. Ask the person who sent it for a new link.");
+      if (form.closed) return message(form.title || "This form is closed", "This form is no longer accepting responses.");
+      render(form);
+    })
+    .catch(() => message("Couldn’t load the form", "Check your internet connection and reload the page."));
+})();
+</script>
+</body>
+</html>
