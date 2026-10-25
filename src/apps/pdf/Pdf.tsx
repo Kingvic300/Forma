@@ -792,7 +792,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
       {body}
       {selected && (
         <>
-          {a.type === "text" && <span className="grip" title="Drag to move" onPointerDown={(e) => drag(e, "move")}><GripVertical size={14} /></span>}
+          {a.type === "text" && <span className="grip" title="Drag to move" onPointerDown={(e) => { e.preventDefault(); drag(e, "move"); }}><GripVertical size={14} /></span>}
           {a.type !== "text" && <span className="resize" onPointerDown={(e) => drag(e, "resize")} />}
           <button className="ann-del" title="Delete" onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}><XIcon size={12} /></button>
         </>
