@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Signature, Square, Trash2, Type, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, TextCursorInput, Signature, Square, Trash2, Type, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -17,6 +17,41 @@ import { CSS_FONT, type Ann, type Font, type PdfData } from "./types";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 type PageLink = { x: number; y: number; w: number; h: number; href: string };
+
+/** A run of text already printed on the page, in page points from the top-left. */
+export type TextRun = { x: number; top: number; w: number; h: number; baseline: number; size: number; str: string; fontName: string; family: string };
+
+async function pageText(doc: PDFDocumentProxy, index: number): Promise<TextRun[]> {
+  const page = await doc.getPage(index + 1);
+  const vp = page.getViewport({ scale: 1 });
+  const tc = await page.getTextContent();
+  const runs: TextRun[] = [];
+  for (const item of tc.items) {
+    if (!("str" in item) || !item.str.trim()) continue;
+    const m = pdfjs.Util.transform(vp.transform, item.transform);
+    if (Math.abs(m[1]) > 0.01 || Math.abs(m[2]) > 0.01) continue; // rotated text isn't editable
+    const size = Math.hypot(m[2], m[3]);
+    if (!size) continue;
+    const style = tc.styles[item.fontName] ?? {};
+    const ascent = style.ascent || 0.8;
+    const descent = style.descent || -0.2;
+    runs.push({ x: m[4], top: m[5] - ascent * size, w: item.width, h: (ascent - descent) * size, baseline: m[5], size, str: item.str, fontName: item.fontName, family: style.fontFamily ?? "" });
+  }
+  return runs;
+}
+
+/** The run under a point, or the nearest one within a few points. */
+function runAt(runs: TextRun[], x: number, y: number) {
+  let best: TextRun | null = null;
+  let bestD = 4;
+  for (const r of runs) {
+    const dx = x < r.x ? r.x - x : x > r.x + r.w ? x - (r.x + r.w) : 0;
+    const dy = y < r.top ? r.top - y : y > r.top + r.h ? y - (r.top + r.h) : 0;
+    const d = Math.hypot(dx, dy);
+    if (d < bestD) [best, bestD] = [r, d];
+  }
+  return best;
+}
 
 /** Clickable areas on a page: the PDF's own link annotations, plus addresses written as plain text. */
 async function pageLinks(doc: PDFDocumentProxy, index: number): Promise<PageLink[]> {
@@ -44,11 +79,12 @@ async function pageLinks(doc: PDFDocumentProxy, index: number): Promise<PageLink
   return out;
 }
 
-type Tool = "select" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross";
+type Tool = "select" | "edit" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross";
 const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "redact", "rect", "line"];
 const TOOLS: [Tool, typeof Type, string][] = [
   ["select", MousePointer2, "Select"],
-  ["text", Type, "Text"],
+  ["edit", TextCursorInput, "Edit text"],
+  ["text", Type, "Add text"],
   ["sign", Signature, "Sign"],
   ["initials", PenLine, "Initials"],
   ["date", CalendarDays, "Date"],
@@ -74,6 +110,7 @@ export default function Pdf({ id }: { id: string }) {
   const [pending, setPending] = useState<{ src: string; ratio: number } | null>(null);
   const [sigFor, setSigFor] = useState<Tool | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [focusText, setFocusText] = useState<string | null>(null);
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const [showFields, setShowFields] = useState(true);
   const [busy, setBusy] = useState("");
@@ -128,9 +165,38 @@ export default function Pdf({ id }: { id: string }) {
     setSelected(ann.id);
     return ann;
   };
+  /** Removing replacement text also removes its white patch, so the original words show again. */
   function remove(aid: string) {
-    f.setData((d) => ({ ...d, anns: d.anns.filter((a) => a.id !== aid) }));
+    f.setData((d) => {
+      const cover = d.anns.find((a) => a.id === aid)?.cover;
+      return { ...d, anns: d.anns.filter((a) => a.id !== aid && a.id !== cover) };
+    });
     setSelected(null);
+  }
+
+  /** Turn a line already on the page into editable text: hide it under white and type over it. */
+  async function editRun(page: number, run: TextRun) {
+    let name = "";
+    try {
+      const p = doc ? await doc.getPage(page + 1) : null;
+      name = p?.commonObjs.has(run.fontName) ? (p.commonObjs.get(run.fontName)?.name ?? "") : "";
+    } catch {
+      // Font details are only a hint for matching the style.
+    }
+    const font: Font = /mono/i.test(run.family) || /courier|mono|consol/i.test(name)
+      ? "courier"
+      : (/serif/i.test(run.family) && !/sans/i.test(run.family)) || (/times|georgia|garamond|cambria|serif/i.test(name) && !/sans/i.test(name))
+        ? "times"
+        : "helv";
+    const pad = run.size * 0.08;
+    const cover: Ann = { id: uid(), page, type: "whiteout", x: run.x - pad, y: run.top - pad, w: run.w + pad * 2, h: run.h + pad * 2, color: "#ffffff" };
+    const text: Ann = {
+      id: uid(), page, type: "text", x: run.x, y: run.baseline - 0.93 * run.size, w: 0, h: 0, text: run.str,
+      size: Math.round(run.size * 10) / 10, font, bold: /bold|black|heavy|semibold|demi/i.test(name), color: "#000000", cover: cover.id,
+    };
+    f.setData((d) => ({ ...d, anns: [...d.anns, cover, text] }));
+    setSelected(text.id);
+    setFocusText(text.id);
   }
   const sel = data.anns.find((a) => a.id === selected);
 
@@ -242,7 +308,7 @@ export default function Pdf({ id }: { id: string }) {
                 <option value="courier">Courier</option>
               </select>
               <select value={sel.size ?? 14} onChange={(e) => update(sel.id, { size: Number(e.target.value) })}>
-                {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 64].map((n) => <option key={n} value={n}>{n} pt</option>)}
+                {[...new Set([8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 64, sel.size ?? 14])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
               </select>
               <button className={sel.bold ? "on" : ""} onClick={() => update(sel.id, { bold: !sel.bold })}><b>B</b></button>
             </>
@@ -253,7 +319,9 @@ export default function Pdf({ id }: { id: string }) {
       )}
       {tool !== "select" && (
         <div className="hint-bar">
-          {tool === "redact"
+          {tool === "edit"
+            ? "Click a line of text to change it. Tip: with Select, double-click text to do the same."
+            : tool === "redact"
             ? "Drag over anything you want gone for good. It’s deleted from the file you download, not just hidden."
             : tool === "whiteout"
               ? "Drag over text to hide it under white. The old words are still in the file underneath; use Black out to remove them for good."
@@ -292,6 +360,8 @@ export default function Pdf({ id }: { id: string }) {
                   onDraw={(r) => add({ page: i, type: tool as Ann["type"], ...r, color: tool === "highlight" ? "#ffeb3b" : tool === "whiteout" ? "#ffffff" : tool === "rect" ? "#e53935" : "#000000" })}
                   onChange={update}
                   onRemove={remove}
+                  onEditRun={(run) => editRun(i, run)}
+                  focusText={focusText}
                 />
               </div>
             ))}
@@ -355,8 +425,11 @@ function PageView(props: {
   onDraw: (r: { x: number; y: number; w: number; h: number }) => void;
   onChange: (id: string, patch: Partial<Ann>) => void;
   onRemove: (id: string) => void;
+  onEditRun: (run: TextRun) => void;
+  focusText: string | null;
 }) {
   const { doc, index, size, scale, tool } = props;
+  const runs = useRef<TextRun[] | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -367,6 +440,7 @@ function PageView(props: {
     if (!visible) return;
     let alive = true;
     pageLinks(doc, index).then((l) => alive && setLinks(l)).catch(() => {});
+    pageText(doc, index).then((r) => alive && (runs.current = r)).catch(() => {});
     return () => {
       alive = false;
     };
@@ -408,18 +482,30 @@ function PageView(props: {
   return (
     <div
       ref={wrap}
-      className={"page" + (tool !== "select" ? " placing" : "")}
+      className={"page" + (tool === "edit" ? " editing" : tool !== "select" ? " placing" : "")}
       style={{ width: size.w * scale, height: size.h * scale }}
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget && e.target !== canvas.current) return;
         if (tool === "select") return props.onSelect(null);
         const p = toPage(e);
+        if (tool === "edit") {
+          e.preventDefault(); // otherwise the mousedown that follows takes focus away from the new text
+          const run = runs.current && runAt(runs.current, p.x, p.y);
+          return run ? props.onEditRun(run) : undefined;
+        }
         if (DRAG_TOOLS.includes(tool)) {
           e.currentTarget.setPointerCapture(e.pointerId);
           setDraft({ x0: p.x, y0: p.y, x: p.x, y: p.y });
         } else props.onPlace(p.x, p.y);
       }}
       onPointerMove={(e) => draft && setDraft({ ...draft, ...toPage(e) })}
+      onDoubleClick={(e) => {
+        // Double-clicking printed text with Select is a shortcut for Edit text.
+        if (tool !== "select" || (e.target !== e.currentTarget && e.target !== canvas.current)) return;
+        const r = wrap.current!.getBoundingClientRect();
+        const run = runs.current && runAt(runs.current, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale);
+        if (run) props.onEditRun(run);
+      }}
       onPointerUp={() => {
         if (!draft) return;
         let r = { x: Math.min(draft.x0, draft.x), y: Math.min(draft.y0, draft.y), w: Math.abs(draft.x - draft.x0), h: Math.abs(draft.y - draft.y0) };
@@ -451,13 +537,13 @@ function PageView(props: {
           />
         ))}
       {props.anns.map((a) => (
-        <AnnView key={a.id} a={a} scale={scale} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} />
+        <AnnView key={a.id} a={a} scale={scale} focus={props.focusText === a.id} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} />
       ))}
     </div>
   );
 }
 
-function AnnView({ a, scale, selected, onSelect, onChange, onRemove }: { a: Ann; scale: number; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void }) {
+function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void }) {
   const [live, setLive] = useState<Partial<Ann> | null>(null); // position/size while dragging
   const text = useRef<HTMLDivElement>(null);
   const v = { ...a, ...live };
@@ -465,7 +551,15 @@ function AnnView({ a, scale, selected, onSelect, onChange, onRemove }: { a: Ann;
   useEffect(() => {
     if (a.type !== "text" || !text.current) return;
     text.current.innerText = a.text ?? "";
-    if (!a.text) text.current.focus();
+    if (!a.text || focus) {
+      text.current.focus();
+      // Caret at the end, ready to change the words.
+      const range = document.createRange();
+      range.selectNodeContents(text.current);
+      range.collapse(false);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+    }
     // Only on mount: afterwards the element owns its text.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -511,7 +605,7 @@ function AnnView({ a, scale, selected, onSelect, onChange, onRemove }: { a: Ann;
           style={{ fontSize: (a.size ?? 14) * scale, fontFamily: CSS_FONT[a.font ?? "helv"], color: a.color, fontWeight: a.bold ? 700 : 400 }}
           onInput={(e) => onChange({ text: e.currentTarget.innerText.replace(/\n$/, "") })}
           onFocus={onSelect}
-          onBlur={(e) => !e.currentTarget.innerText.trim() && onRemove()}
+          onBlur={(e) => !e.currentTarget.innerText.trim() && !a.cover && onRemove()}
           onPointerDown={(e) => { e.stopPropagation(); onSelect(); }}
         />
       );

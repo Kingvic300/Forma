@@ -16,6 +16,8 @@ export interface Ann {
   color?: string;
   bold?: boolean;
   src?: string; // PNG data URL for images and signatures
+  /** For text that replaces words already in the PDF: the white patch hiding the original. */
+  cover?: string;
 }
 
 export interface PdfData {
