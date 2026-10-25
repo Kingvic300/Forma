@@ -139,3 +139,35 @@ export function Missing({ app }: { app: AppId }) {
     </div>
   );
 }
+
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    addEventListener("keydown", esc);
+    return () => removeEventListener("keydown", esc);
+  }, [onClose]);
+  return (
+    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={"modal" + (wide ? " wide" : "")} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon" onClick={onClose} aria-label="Close"><X /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function Spinner() {
+  return <Loader2 className="spin" aria-label="Loading" />;
+}
+
+export const timeAgo = (t: number) => {
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return "Just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 7 * 86400) return new Date(t).toLocaleDateString(undefined, { weekday: "long" });
+  return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+};
