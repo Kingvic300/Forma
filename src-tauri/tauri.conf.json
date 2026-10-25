@@ -20,6 +20,7 @@
         "minWidth": 960,
         "minHeight": 620,
         "resizable": true,
+        "maximized": true,
         "center": true,
         "theme": "Dark",
         "backgroundColor": "#000000",

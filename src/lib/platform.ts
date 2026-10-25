@@ -44,6 +44,22 @@ export async function openExternal(href: string) {
   } else window.open(href, "_blank", "noopener,noreferrer");
 }
 
+/** Window controls, for desktops whose title bar has no maximise button. */
+export async function toggleMaximize() {
+  if (!isTauri) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().toggleMaximize();
+}
+
+export async function toggleFullscreen() {
+  if (isTauri) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const w = getCurrentWindow();
+    await w.setFullscreen(!(await w.isFullscreen()));
+  } else if (document.fullscreenElement) await document.exitFullscreen();
+  else await document.documentElement.requestFullscreen();
+}
+
 /** Files passed on the command line or via "Open with Forma" from the OS. */
 export async function takeLaunchFiles(): Promise<File[]> {
   if (!isTauri) return [];
