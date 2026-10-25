@@ -1,3 +1,5 @@
+import type { OnlineForm } from "../../lib/online";
+
 export type QType = "short" | "paragraph" | "choice" | "checkbox" | "dropdown" | "number" | "email" | "date" | "scale";
 
 export interface Question {
@@ -12,6 +14,8 @@ export interface Question {
 export interface Response {
   at: number;
   answers: Record<string, string | string[]>;
+  /** Number of the answer in the online database, for answers that came in from a shared link. */
+  rid?: number;
 }
 
 export interface FormData {
@@ -20,6 +24,8 @@ export interface FormData {
   color?: string;
   questions: Question[];
   responses: Response[];
+  /** Set while the form is shared as an online link. */
+  online?: OnlineForm;
 }
 
 export const TYPES: [QType, string][] = [
