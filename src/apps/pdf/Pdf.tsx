@@ -693,6 +693,8 @@ function readSpans(root: HTMLElement): Span[][] {
   return lines;
 }
 
+const TEXT_EDGE = 6; // px of draggable border around a text box
+
 function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void }) {
   const [live, setLive] = useState<Partial<Ann> | null>(null); // position/size while dragging
   const text = useRef<HTMLDivElement>(null);
@@ -740,7 +742,8 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
     addEventListener("pointerup", up);
   }
 
-  const box: React.CSSProperties = { left: v.x * scale, top: v.y * scale };
+  // Text boxes get a thin border zone (outside the typing area) that drags the box; the text itself stays put.
+  const box: React.CSSProperties = a.type === "text" ? { left: v.x * scale - TEXT_EDGE, top: v.y * scale - TEXT_EDGE, padding: TEXT_EDGE, cursor: "move" } : { left: v.x * scale, top: v.y * scale };
   if (a.type !== "text") Object.assign(box, { width: v.w * scale, height: v.h * scale });
 
   let body: React.ReactNode = null;
@@ -787,7 +790,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
     <div
       className={`ann ann-${a.type}` + (selected ? " sel" : "")}
       style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : a.type === "rect" ? { borderColor: a.color } : {}) }}
-      onPointerDown={(e) => { if (a.type === "text") return; onSelect(); drag(e, "move"); }}
+      onPointerDown={(e) => { if (a.type === "text" && e.target !== e.currentTarget) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
     >
       {body}
       {selected && (
