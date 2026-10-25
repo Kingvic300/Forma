@@ -24,36 +24,54 @@ export function useUpdater() {
   const busy = useRef(false);
   const pending = useRef<{ install: () => Promise<void> } | null>(null);
 
+  // Set when someone clicks "Check for updates" while a background check is still running,
+  // so the result of that check is shown to them instead of nothing.
+  const report = useRef(false);
+
   /** Returns false when the check couldn't complete, so the caller can retry sooner. */
   const check = useCallback(async (manual = false) => {
-    if (!isTauri || busy.current || pending.current) return true;
+    if (!isTauri || pending.current) return true;
+    if (busy.current) {
+      if (manual) {
+        report.current = true;
+        setState((s) => (s.kind === "downloading" ? s : { kind: "checking" }));
+      }
+      return true;
+    }
     busy.current = true;
+    report.current = manual;
     if (manual) setState({ kind: "checking" });
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
+      // Time limits: on a patchy connection a request can hang forever instead of failing.
+      const update = await check({ timeout: 30_000 });
       if (!update) {
-        if (manual) setState({ kind: "latest" });
+        if (report.current) setState({ kind: "latest" });
         return true;
       }
       let total = 0;
       let done = 0;
       setState({ kind: "downloading", version: update.version, progress: null });
-      await update.download((e) => {
-        if (e.event === "Started") total = e.data.contentLength ?? 0;
-        if (e.event === "Progress") {
-          done += e.data.chunkLength;
-          setState({ kind: "downloading", version: update.version, progress: total ? Math.round((100 * done) / total) : null });
-        }
-      });
+      await update.download(
+        (e) => {
+          if (e.event === "Started") total = e.data.contentLength ?? 0;
+          if (e.event === "Progress") {
+            done += e.data.chunkLength;
+            setState({ kind: "downloading", version: update.version, progress: total ? Math.round((100 * done) / total) : null });
+          }
+        },
+        { timeout: 15 * 60_000 },
+      );
       pending.current = update;
       setState({ kind: "ready", version: update.version, notes: update.body });
       return true;
     } catch (e) {
-      setState(manual ? { kind: "error", message: e instanceof Error ? e.message : String(e) } : { kind: "idle" });
+      const message = e instanceof Error ? e.message : String(e);
+      setState(report.current ? { kind: "error", message: /timed? ?out|connect|dns|network/i.test(message) ? "Couldn’t reach GitHub. Check your internet connection and try again." : message } : { kind: "idle" });
       return false;
     } finally {
       busy.current = false;
+      report.current = false;
     }
   }, []);
 
