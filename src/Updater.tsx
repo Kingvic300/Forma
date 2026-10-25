@@ -1,0 +1,78 @@
+/**
+ * Background updates: check GitHub Releases quietly, download the signed update in the
+ * background, then offer a one-click restart. Updates are verified against the public key
+ * built into the app, so only releases signed with the project's private key can install.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, RefreshCw, X } from "lucide-react";
+import { isTauri } from "./lib/platform";
+import { getSetting } from "./lib/store";
+
+const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+
+export type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "latest" }
+  | { kind: "downloading"; version: string; progress: number | null }
+  | { kind: "ready"; version: string; notes?: string }
+  | { kind: "error"; message: string };
+
+export function useUpdater() {
+  const [state, setState] = useState<UpdateState>({ kind: "idle" });
+  const busy = useRef(false);
+  const pending = useRef<{ install: () => Promise<void> } | null>(null);
+
+  const check = useCallback(async (manual = false) => {
+    if (!isTauri || busy.current || pending.current) return;
+    busy.current = true;
+    if (manual) setState({ kind: "checking" });
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (!update) {
+        if (manual) setState({ kind: "latest" });
+        return;
+      }
+      let total = 0;
+      let done = 0;
+      setState({ kind: "downloading", version: update.version, progress: null });
+      await update.download((e) => {
+        if (e.event === "Started") total = e.data.contentLength ?? 0;
+        if (e.event === "Progress") {
+          done += e.data.chunkLength;
+          setState({ kind: "downloading", version: update.version, progress: total ? Math.round((100 * done) / total) : null });
+        }
+      });
+      pending.current = update;
+      setState({ kind: "ready", version: update.version, notes: update.body });
+    } catch (e) {
+      setState(manual ? { kind: "error", message: e instanceof Error ? e.message : String(e) } : { kind: "idle" });
+    } finally {
+      busy.current = false;
+    }
+  }, []);
+
+  const restart = useCallback(async () => {
+    if (!pending.current) return;
+    await pending.current.install();
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let timer: number | undefined;
+    const first = window.setTimeout(async () => {
+      if ((await getSetting<boolean>("autoUpdate")) === false) return;
+      check();
+      timer = window.setInterval(() => check(), CHECK_EVERY_MS);
+    }, 15_000); // let the app settle first
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, [check]);
+
+  return { state, setState, check, restart };
+}
