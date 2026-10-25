@@ -1,0 +1,43 @@
+name: Auto release
+# Every push to main that changes the app bumps the patch version, tags it and starts the
+# Release workflow, so a plain `git push` ships an update. Push a `v*` tag by hand
+# (scripts/bump.sh) for a minor or major version instead.
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "src-tauri/**", "public/**", "index.html", "package.json", "package-lock.json"]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency: auto-release
+
+jobs:
+  bump:
+    # The version commit below touches package.json, so skip it to avoid a loop.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore: release') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Bump, tag and start the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          v="$major.$minor.$((patch + 1))"
+          npm version "$v" --no-git-tag-version >/dev/null
+          sed -i -E "s/^version = \".*\"/version = \"$v\"/" src-tauri/Cargo.toml
+          sed -i -E "s/\"version\": \"[^\"]*\"/\"version\": \"$v\"/" src-tauri/tauri.conf.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git commit -m "chore: release v$v"
+          git tag "v$v"
+          git push origin HEAD:main "v$v"
+          # Pushes made with GITHUB_TOKEN don't start other workflows, so start it explicitly.
+          gh workflow run release.yml --ref "v$v"
