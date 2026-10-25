@@ -1,6 +1,6 @@
 import { askConfirm, askText, errorText, toast } from "../../lib/dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownAZ, ArrowDownZA, ExternalLink, Mail, Redo2, Undo2 } from "lucide-react";
+import { ArrowDownAZ, ArrowDownZA, ExternalLink, Mail, Plus, Redo2, Undo2, X } from "lucide-react";
 import { findLinks, openLink } from "../../lib/links";
 import Papa from "papaparse";
 import { useFile } from "../../lib/useFile";
@@ -401,18 +401,22 @@ export default function Sheets({ id }: { id: string }) {
         </div>
       </div>
       <div className="sheet-tabs">
-        <button className="add" title="Add sheet" onClick={() => addSheet()}>+</button>
+        <button className="add" title="Add sheet" aria-label="Add sheet" onClick={() => addSheet()}><Plus /></button>
         {data.sheets.map((s, i) => (
-          <button
-            key={i}
-            className={"tab" + (i === active ? " on" : "")}
-            onClick={() => setActive(i)}
-            onDoubleClick={() => renameSheet(i)}
-            onContextMenu={(e) => { e.preventDefault(); removeSheet(i); }}
-            title="Double-click to rename, right-click to delete"
-          >
-            {s.name}
-          </button>
+          <div key={i} className={"tab" + (i === active ? " on" : "")}>
+            <button
+              className="tab-name"
+              onClick={() => setActive(i)}
+              onDoubleClick={() => renameSheet(i)}
+              onContextMenu={(e) => { e.preventDefault(); removeSheet(i); }}
+              title="Double-click to rename"
+            >
+              {s.name}
+            </button>
+            {data.sheets.length > 1 && (
+              <button className="tab-x" title={`Delete ${s.name}`} aria-label={`Delete sheet ${s.name}`} onClick={() => removeSheet(i)}><X /></button>
+            )}
+          </div>
         ))}
         <span className="grow" />
         {stats && (
