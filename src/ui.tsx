@@ -42,3 +42,52 @@ export function AppIcon({ app, size = 24 }: { app: AppId; size?: number }) {
     </span>
   );
 }
+
+/** Close a popover on outside click or Escape. */
+export function useDismiss(open: boolean, setOpen: (v: boolean) => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const click = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const t = setTimeout(() => addEventListener("mousedown", click));
+    addEventListener("keydown", esc);
+    return () => {
+      clearTimeout(t);
+      removeEventListener("mousedown", click);
+      removeEventListener("keydown", esc);
+    };
+  }, [open, setOpen]);
+  return ref;
+}
+
+/** Gmail-style app switcher: every app in a grid, opened from the box at the top of the sidebar. */
+export function AppSwitcher({ current, open, setOpen, onPick }: { current: AppId; open: boolean; setOpen: (v: boolean) => void; onPick: (a: AppId) => void }) {
+  const ref = useDismiss(open, setOpen);
+  const first = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (open) first.current?.focus();
+  }, [open]);
+  if (!open) return null;
+  return (
+    <div className="switcher pop" ref={ref} role="menu" aria-label="Apps">
+      {APPS.map((a, i) => (
+        <button
+          key={a.id}
+          ref={a.id === current ? first : undefined}
+          role="menuitem"
+          className={a.id === current ? "on" : ""}
+          onClick={() => {
+            onPick(a.id);
+            setOpen(false);
+          }}
+        >
+          <AppIcon app={a.id} size={36} />
+          <span className="sw-name">{a.name}</span>
+          <span className="sw-blurb">{a.blurb}</span>
+          <span className="key">Ctrl {i + 1}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
