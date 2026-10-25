@@ -8,7 +8,7 @@ const INKS = ["#111111", "#1a3fb0", "#b71c1c"];
 
 /** Crop transparent margins from a canvas and return a PNG data URL. */
 function trimmed(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   const { width, height } = canvas;
   const px = ctx.getImageData(0, 0, width, height).data;
   let x1 = width, y1 = height, x2 = -1, y2 = -1;
@@ -25,7 +25,7 @@ function trimmed(canvas: HTMLCanvasElement) {
   const out = document.createElement("canvas");
   out.width = x2 - x1 + pad * 2;
   out.height = y2 - y1 + pad * 2;
-  out.getContext("2d")!.drawImage(canvas, x1 - pad, y1 - pad, out.width, out.height, 0, 0, out.width, out.height);
+  out.getContext("2d", { willReadFrequently: true })!.drawImage(canvas, x1 - pad, y1 - pad, out.width, out.height, 0, 0, out.width, out.height);
   return out.toDataURL("image/png");
 }
 
@@ -40,7 +40,7 @@ export async function imageToPng(file: Blob): Promise<string> {
     const c = document.createElement("canvas");
     c.width = Math.round(img.width * scale);
     c.height = Math.round(img.height * scale);
-    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+    c.getContext("2d", { willReadFrequently: true })!.drawImage(img, 0, 0, c.width, c.height);
     return c.toDataURL("image/png");
   } finally {
     URL.revokeObjectURL(url);
@@ -75,7 +75,7 @@ export function SignaturePad({ title = "Add signature", onPick, onClose }: { tit
     const c = document.createElement("canvas");
     c.width = 900;
     c.height = 260;
-    const ctx = c.getContext("2d")!;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
     ctx.fillStyle = ink;
     ctx.font = `${script === "Allura" ? 120 : 104}px '${script}', cursive`;
     ctx.textBaseline = "middle";
@@ -124,7 +124,7 @@ export function SignaturePad({ title = "Add signature", onPick, onClose }: { tit
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); drawing.current = point(e); }}
             onPointerMove={(e) => {
               if (!drawing.current) return;
-              const ctx = e.currentTarget.getContext("2d")!;
+              const ctx = e.currentTarget.getContext("2d", { willReadFrequently: true })!;
               const p = point(e);
               ctx.strokeStyle = ink;
               ctx.lineWidth = 5;
@@ -167,7 +167,7 @@ export function SignaturePad({ title = "Add signature", onPick, onClose }: { tit
         <div className="modal-foot">
           <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember on this computer</label>
           <span className="grow" />
-          {tab === "draw" && <button onClick={() => { canvas.current!.getContext("2d")!.clearRect(0, 0, 900, 300); setDirty(false); }}>Clear</button>}
+          {tab === "draw" && <button onClick={() => { canvas.current!.getContext("2d", { willReadFrequently: true })!.clearRect(0, 0, 900, 300); setDirty(false); }}>Clear</button>}
           {tab !== "upload" && (
             <button className="primary" disabled={tab === "draw" ? !dirty : !typed.trim()} onClick={() => finish(tab === "draw" ? trimmed(canvas.current!) : typedPng())}>
               Use signature

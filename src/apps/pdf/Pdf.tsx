@@ -329,7 +329,9 @@ function PageView(props: {
       const c = canvas.current;
       c.width = Math.floor(vp.width);
       c.height = Math.floor(vp.height);
-      task = page.render({ canvasContext: c.getContext("2d")!, viewport: vp });
+      // A CPU-backed canvas: WebKitGTK's accelerated 2D canvas drops or shifts parts of
+      // pdf.js output (missing text bands, blocks drawn in the wrong place).
+      task = page.render({ canvasContext: c.getContext("2d", { willReadFrequently: true })!, viewport: vp });
       task.promise.catch(() => {});
     });
     return () => {
