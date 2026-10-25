@@ -1,4 +1,6 @@
 // Bridges browser APIs to native ones when running inside the Tauri shell.
+import { toast } from "./dialog";
+
 export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const MIME: Record<string, string> = {
@@ -21,12 +23,14 @@ export async function saveAs(filename: string, content: Uint8Array | string): Pr
     const path = await save({ defaultPath: filename, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
     if (!path) return false;
     await writeFile(path, bytes);
+    toast(`Saved ${path.split(/[\\/]/).pop()}`, "success");
     return true;
   }
   const url = URL.createObjectURL(new Blob([bytes], { type: MIME[ext] ?? "application/octet-stream" }));
   const a = Object.assign(document.createElement("a"), { href: url, download: filename });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`Downloaded ${filename}`, "success");
   return true;
 }
 
