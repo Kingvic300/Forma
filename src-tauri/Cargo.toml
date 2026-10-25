@@ -1,6 +1,6 @@
 [package]
 name = "forma"
-version = "0.1.1"
+version = "0.1.2"
 description = "Forma — offline desktop suite: Docs, Sheets, Forms, PDF and Tracker"
 authors = ["Forma contributors"]
 license = "MIT"
