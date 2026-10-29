@@ -5,7 +5,7 @@ import { findLinks, openLink } from "../../lib/links";
 import Papa from "papaparse";
 import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
-import { csvToCells } from "../../lib/importers";
+import { csvToCells, workbookToSheets } from "../../lib/importers";
 import { TitleBar, Missing, Menu } from "../../ui";
 import { colName, display, makeEvaluator } from "./formula";
 import type { Sheet, SheetsData } from "./types";
@@ -256,9 +256,7 @@ export default function Sheets({ id }: { id: string }) {
   }
   async function importInto(file: File) {
     if (/\.(csv|tsv)$/i.test(file.name)) return addSheet(file.name.replace(/\.[^.]+$/, ""), csvToCells(await file.text()));
-    const XLSX = await import("xlsx");
-    const wb = XLSX.read(await file.arrayBuffer());
-    const added = wb.SheetNames.map((n) => ({ name: n, cells: (XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: "" }) as unknown[][]).map((r) => r.map((v) => String(v ?? ""))) }));
+    const added = await workbookToSheets(await file.arrayBuffer());
     commit({ sheets: [...data.sheets, ...added] });
     setActive(data.sheets.length);
   }

@@ -1,7 +1,7 @@
 import Papa from "papaparse";
 import { linkifyElement, linkifyHtml } from "./links";
 import { createFile, type Kind } from "./store";
-import type { SheetsData } from "../apps/sheets/types";
+import type { Sheet, SheetsData } from "../apps/sheets/types";
 import type { DocsData } from "../apps/Docs";
 import type { FormData } from "../apps/forms/types";
 import type { PdfData } from "../apps/pdf/types";
@@ -41,6 +41,22 @@ export function blank(kind: Kind): unknown {
 export const csvToCells = (text: string) =>
   Papa.parse<string[]>(text, { skipEmptyLines: false }).data.map((r) => r.map((v) => String(v ?? "")));
 
+/** Read an Excel or OpenDocument workbook, keeping formulas and blank rows. */
+export async function workbookToSheets(buf: ArrayBuffer): Promise<Sheet[]> {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(buf);
+  return wb.SheetNames.map((sn) => {
+    const ws = wb.Sheets[sn];
+    const cells: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", blankrows: true });
+    for (const addr of Object.keys(ws)) {
+      if (addr[0] === "!" || !ws[addr].f) continue;
+      const { r, c } = XLSX.utils.decode_cell(addr);
+      (cells[r] ??= [])[c] = "=" + ws[addr].f;
+    }
+    return { name: sn, cells: cells.map((row) => Array.from(row ?? [], (v) => String(v ?? ""))) };
+  });
+}
+
 /** Turn a file from disk into a Forma file. Returns the new file's kind and id. */
 export async function importFile(file: File): Promise<{ kind: Kind; id: string }> {
   const ext = file.name.split(".").pop()!.toLowerCase();
@@ -55,18 +71,7 @@ export async function importFile(file: File): Promise<{ kind: Kind; id: string }
     return { kind: "sheets", id: await createFile("sheets", name, data) };
   }
   if (ext === "xlsx" || ext === "xls" || ext === "ods") {
-    const XLSX = await import("xlsx");
-    const wb = XLSX.read(await file.arrayBuffer());
-    const sheets = wb.SheetNames.map((sn) => {
-      const ws = wb.Sheets[sn];
-      const cells: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", blankrows: true });
-      for (const addr of Object.keys(ws)) {
-        if (addr[0] === "!" || !ws[addr].f) continue;
-        const { r, c } = XLSX.utils.decode_cell(addr);
-        (cells[r] ??= [])[c] = "=" + ws[addr].f;
-      }
-      return { name: sn, cells: cells.map((row) => Array.from(row ?? [], (v) => String(v ?? ""))) };
-    });
+    const sheets = await workbookToSheets(await file.arrayBuffer());
     return { kind: "sheets", id: await createFile("sheets", name, { sheets } satisfies SheetsData) };
   }
   if (ext === "docx") {

@@ -58,9 +58,12 @@
     ],
     "fileAssociations": [
       { "ext": ["pdf"], "name": "PDF document", "role": "Editor", "mimeType": "application/pdf" },
-      { "ext": ["csv", "tsv"], "name": "CSV spreadsheet", "role": "Editor", "mimeType": "text/csv" },
-      { "ext": ["xlsx", "xls", "ods"], "name": "Spreadsheet", "role": "Editor" },
-      { "ext": ["docx"], "name": "Word document", "role": "Editor" }
+      { "ext": ["csv"], "name": "CSV spreadsheet", "role": "Editor", "mimeType": "text/csv" },
+      { "ext": ["tsv"], "name": "TSV spreadsheet", "role": "Editor", "mimeType": "text/tab-separated-values" },
+      { "ext": ["xlsx"], "name": "Excel workbook", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      { "ext": ["xls"], "name": "Excel 97-2003 workbook", "role": "Editor", "mimeType": "application/vnd.ms-excel" },
+      { "ext": ["ods"], "name": "OpenDocument spreadsheet", "role": "Editor", "mimeType": "application/vnd.oasis.opendocument.spreadsheet" },
+      { "ext": ["docx"], "name": "Word document", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }
     ],
     "linux": {
       "deb": {
