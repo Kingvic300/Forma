@@ -29,6 +29,18 @@ export interface Ann {
   lead?: number;
   /** Lines of text with bold parts kept, for text edited from the PDF. Overrides `text` for drawing. */
   spans?: Span[][];
+  /** Lines run from (x, y) to (x2, y2). Older lines without these are horizontal across the box. */
+  x2?: number;
+  y2?: number;
+  /** Stroke width in points for lines and boxes. */
+  thick?: number;
+  /** Clockwise turn in degrees about the centre, for boxes, images and marks. */
+  rot?: number;
+}
+
+/** The two ends of a line annotation, in page points. */
+export function lineEnds(a: Ann): [number, number, number, number] {
+  return a.x2 !== undefined && a.y2 !== undefined ? [a.x, a.y, a.x2, a.y2] : [a.x, a.y + a.h / 2, a.x + a.w, a.y + a.h / 2];
 }
 
 export interface PdfData {

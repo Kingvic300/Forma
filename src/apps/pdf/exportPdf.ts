@@ -1,7 +1,7 @@
 import fontkit from "@pdf-lib/fontkit";
-import { PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
+import { degrees, PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
 import { fontBytes } from "./fonts";
-import type { Ann, Font, PdfData, Span } from "./types";
+import { lineEnds, type Ann, type Font, type PdfData, type Span } from "./types";
 
 const hex = (h = "#000000") => {
   const n = parseInt(h.slice(1), 16);
@@ -82,6 +82,15 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
     const box = page.getCropBox();
     const X = (x: number) => box.x + x;
     const Y = (y: number) => box.y + box.height - y; // flip: PDF origin is bottom-left
+    // Boxes, images and marks can be turned about their centre (clockwise on screen).
+    const rot = a.type === "redact" || a.type === "text" || a.type === "line" ? 0 : a.rot ?? 0;
+    const cx = a.x + a.w / 2;
+    const cy = a.y + a.h / 2;
+    const sin = Math.sin((rot * Math.PI) / 180);
+    const cos = Math.cos((rot * Math.PI) / 180);
+    /** A point in the unturned box, as a PDF point after turning. */
+    const pt = (px: number, py: number) => ({ x: X(cx + (px - cx) * cos - (py - cy) * sin), y: Y(cy + (px - cx) * sin + (py - cy) * cos) });
+    const corner = { ...pt(a.x, a.y + a.h), rotate: degrees(-rot) }; // bottom-left corner
     draw(a);
 
     async function drawText(a: Ann) {
@@ -106,29 +115,31 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
     function draw(a: Ann) {
       switch (a.type) {
         case "highlight":
-          page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, color: hex(a.color ?? "#ffeb3b"), opacity: 0.4 });
+          page.drawRectangle({ ...corner, width: a.w, height: a.h, color: hex(a.color ?? "#ffeb3b"), opacity: 0.4 });
           break;
         case "whiteout":
-          page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, color: hex(a.color ?? "#ffffff") });
+          page.drawRectangle({ ...corner, width: a.w, height: a.h, color: hex(a.color ?? "#ffffff") });
           break;
         case "rect":
-          page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, borderColor: hex(a.color ?? "#e53935"), borderWidth: 2 });
+          page.drawRectangle({ ...corner, width: a.w, height: a.h, borderColor: hex(a.color ?? "#e53935"), borderWidth: a.thick ?? 2 });
           break;
-        case "line":
-          page.drawLine({ start: { x: X(a.x), y: Y(a.y + a.h / 2) }, end: { x: X(a.x + a.w), y: Y(a.y + a.h / 2) }, thickness: 1.5, color: hex(a.color) });
+        case "line": {
+          const [x1, y1, x2, y2] = lineEnds(a);
+          page.drawLine({ start: { x: X(x1), y: Y(y1) }, end: { x: X(x2), y: Y(y2) }, thickness: a.thick ?? 1.5, color: hex(a.color) });
           break;
+        }
         case "check": {
           const c = hex(a.color);
           const t = Math.max(1.5, a.w / 9);
-          page.drawLine({ start: { x: X(a.x + a.w * 0.12), y: Y(a.y + a.h * 0.55) }, end: { x: X(a.x + a.w * 0.4), y: Y(a.y + a.h * 0.85) }, thickness: t, color: c });
-          page.drawLine({ start: { x: X(a.x + a.w * 0.4), y: Y(a.y + a.h * 0.85) }, end: { x: X(a.x + a.w * 0.9), y: Y(a.y + a.h * 0.15) }, thickness: t, color: c });
+          page.drawLine({ start: pt(a.x + a.w * 0.12, a.y + a.h * 0.55), end: pt(a.x + a.w * 0.4, a.y + a.h * 0.85), thickness: t, color: c });
+          page.drawLine({ start: pt(a.x + a.w * 0.4, a.y + a.h * 0.85), end: pt(a.x + a.w * 0.9, a.y + a.h * 0.15), thickness: t, color: c });
           break;
         }
         case "cross": {
           const c = hex(a.color);
           const t = Math.max(1.5, a.w / 9);
-          page.drawLine({ start: { x: X(a.x + a.w * 0.15), y: Y(a.y + a.h * 0.15) }, end: { x: X(a.x + a.w * 0.85), y: Y(a.y + a.h * 0.85) }, thickness: t, color: c });
-          page.drawLine({ start: { x: X(a.x + a.w * 0.85), y: Y(a.y + a.h * 0.15) }, end: { x: X(a.x + a.w * 0.15), y: Y(a.y + a.h * 0.85) }, thickness: t, color: c });
+          page.drawLine({ start: pt(a.x + a.w * 0.15, a.y + a.h * 0.15), end: pt(a.x + a.w * 0.85, a.y + a.h * 0.85), thickness: t, color: c });
+          page.drawLine({ start: pt(a.x + a.w * 0.85, a.y + a.h * 0.15), end: pt(a.x + a.w * 0.15, a.y + a.h * 0.85), thickness: t, color: c });
           break;
         }
       }
@@ -137,7 +148,7 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
     if (a.type === "image" && a.src) {
       let img = images.get(a.src);
       if (!img) images.set(a.src, (img = await pdf.embedPng(a.src)));
-      page.drawImage(img, { x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h });
+      page.drawImage(img, { ...corner, width: a.w, height: a.h });
     }
   }
   // Redacted pages leave their old content behind as unreferenced objects; make sure none is written.

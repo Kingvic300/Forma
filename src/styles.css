@@ -525,7 +525,15 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .ann-redact { background: #000; }
 .ann-redact.sel { outline-color: var(--cyan); }
 .draft.redact { background: #000; border-color: #000; }
-.ann-line { position: absolute; left: 0; right: 0; top: 50%; height: 1.5px; transform: translateY(-50%); }
+/* The line's box is only a hit area: clicks go to the stroke, the end handles and the delete button. */
+.ann.ann-line { pointer-events: none; }
+.ann-line .handle, .ann-line .ann-del { pointer-events: auto; }
+.ann-line-svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.ann-line-svg line { pointer-events: stroke; }
+.ann-line.sel, .ann.ann-line.sel { outline: none; }
+.ann-line-svg line { cursor: move; }
+.handle { position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border: 2px solid #fff; border-radius: 50%; background: #0891b2; cursor: crosshair; }
+.draft-line { position: absolute; inset: 0; pointer-events: none; }
 .ann-image img { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
 .ann-text { min-width: 8px; padding: 0; outline: none; white-space: pre; line-height: 1.2; cursor: text; user-select: text; }
 .ann-text:empty::before { content: "Type here"; color: #94a3b8; }
@@ -534,7 +542,9 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .ann-text:focus-visible { box-shadow: none; }
 .grip, .resize, .ann-del { position: absolute; }
 .grip { left: -22px; top: -1px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; background: #0891b2; color: #fff; cursor: move; }
-.resize { right: -6px; bottom: -6px; width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: #0891b2; cursor: nwse-resize; }
+.resize { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border: 2px solid #fff; border-radius: 50%; background: #0891b2; }
+.rotate { position: absolute; left: 50%; top: -30px; width: 13px; height: 13px; margin-left: -6.5px; border: 2px solid #fff; border-radius: 50%; background: #0e7490; cursor: grab; }
+.rotate::after { content: ""; position: absolute; left: 4.5px; top: 11px; width: 1.5px; height: 15px; background: #0891b2; }
 .ann-del { right: -11px; top: -26px; width: 22px; height: 22px; min-width: 0; padding: 0; border: 0; border-radius: 50%; background: #111111; color: #fff; box-shadow: 0 0 0 1px #0891b2; }
 .ann-del:hover:not(:disabled) { background: var(--danger-solid); border: 0; }
 .fields { width: 300px; flex: none; overflow: auto; padding: 16px; background: var(--panel); border-left: 1px solid var(--line-soft); }
@@ -612,3 +622,14 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 @font-face { font-family: "Forma Mono"; src: url("./assets/fonts/LiberationMono-Bold.ttf") format("truetype"); font-weight: 700; }
 @font-face { font-family: "Forma Carlito"; src: url("./assets/fonts/Carlito-Regular.ttf") format("truetype"); font-weight: 400; }
 @font-face { font-family: "Forma Carlito"; src: url("./assets/fonts/Carlito-Bold.ttf") format("truetype"); font-weight: 700; }
+
+.fields.ai { display: flex; flex-direction: column; gap: 10px; width: 340px; }
+.ai-head { display: flex; align-items: center; gap: 4px; }
+.ai-head h3 { margin: 0; display: flex; align-items: center; gap: 6px; }
+.ai-chat { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.ai-chat p { margin: 0; }
+.ai-msg { padding: 8px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; background: var(--well); color: var(--text); }
+.ai-msg.user { align-self: flex-end; background: #0e7490; color: #fff; max-width: 90%; }
+.ai-msg.error { color: #fca5a5; }
+.ai-input { display: flex; gap: 6px; align-items: flex-end; }
+.ai-input textarea { flex: 1; resize: none; font: inherit; font-size: 12.5px; }

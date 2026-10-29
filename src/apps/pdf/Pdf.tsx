@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, TextCursorInput, Signature, Square, Trash2, Type, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -13,7 +13,8 @@ import { rasterizePage } from "./redact";
 import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields, type FieldInfo } from "./exportPdf";
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { isBoldName, matchFont } from "./fonts";
-import { CSS_FONT, FONT_LABEL, type Ann, type Font, type PdfData, type Span } from "./types";
+import { askAi, getGroqKey, setGroqKey, type AiOp } from "./ai";
+import { CSS_FONT, FONT_LABEL, lineEnds, type Ann, type Font, type PdfData, type Span } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -204,6 +205,11 @@ export default function Pdf({ id }: { id: string }) {
   const [fields, setFields] = useState<FieldInfo[]>([]);
   const [showFields, setShowFields] = useState(true);
   const [busy, setBusy] = useState("");
+  const [showAi, setShowAi] = useState(false);
+  const past = useRef<PdfData[]>([]);
+  const future = useRef<PdfData[]>([]);
+  const lastEdit = useRef({ key: "", at: 0 });
+  const keepView = useRef<{ x: number; y: number } | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const mergeInput = useRef<HTMLInputElement>(null);
   const bytes = f.data?.bytes;
@@ -232,32 +238,103 @@ export default function Pdf({ id }: { id: string }) {
     };
   }, [bytes]);
 
+  /** Every change to the file goes through here so Ctrl+Z can take it back. Quick repeats with one key (typing) share a step. */
+  const mutate = (fn: (d: PdfData) => PdfData, key = "") => {
+    f.setData((d) => {
+      const now = Date.now();
+      if (!key || key !== lastEdit.current.key || now - lastEdit.current.at > 800) {
+        past.current.push(d);
+        if (past.current.length > 100) past.current.shift();
+      }
+      lastEdit.current = { key, at: now };
+      future.current = [];
+      return fn(d);
+    });
+  };
+  const undo = () => {
+    if (!past.current.length) return;
+    f.setData((d) => {
+      future.current.push(d);
+      return past.current.pop()!;
+    });
+    lastEdit.current = { key: "", at: 0 };
+    setSelected(null);
+  };
+  const redo = () => {
+    if (!future.current.length) return;
+    f.setData((d) => {
+      past.current.push(d);
+      return future.current.pop()!;
+    });
+    lastEdit.current = { key: "", at: 0 };
+    setSelected(null);
+  };
+
+  // No rounding: trackpad pinch sends tiny steps that would round back to the same zoom.
+  const zoomBy = (factor: number) => {
+    const el = document.querySelector<HTMLElement>(".pdf-scroll");
+    if (el) keepView.current = { x: (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth, y: (el.scrollTop + el.clientHeight / 2) / el.scrollHeight };
+    setScale((s) => Math.min(4, Math.max(0.4, s * factor)));
+  };
+  // Keep the same spot of the document in view after the pages change size.
+  useLayoutEffect(() => {
+    const el = document.querySelector<HTMLElement>(".pdf-scroll");
+    const v = keepView.current;
+    if (!el || !v) return;
+    keepView.current = null;
+    el.scrollLeft = v.x * el.scrollWidth - el.clientWidth / 2;
+    el.scrollTop = v.y * el.scrollHeight - el.clientHeight / 2;
+  }, [scale]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const editing = (e.target as HTMLElement).isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement).tagName);
+      const el = e.target as HTMLElement;
+      const editing = el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
       if (e.key === "Escape") { setTool("select"); setSelected(null); setPending(null); }
       if (!editing && selected && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); remove(selected); }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "=" || e.key === "+")) { e.preventDefault(); setScale((s) => Math.min(4, s + 0.2)); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "-") { e.preventDefault(); setScale((s) => Math.max(0.4, s - 0.2)); }
+      // Text boxes are ours to undo; other fields (rename, AI box) keep the browser's own undo.
+      if (mod && !e.altKey && (k === "z" || k === "y") && (!editing || el.classList.contains("ann-text"))) {
+        e.preventDefault();
+        if (k === "y" || e.shiftKey) redo();
+        else undo();
+      }
+      if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); zoomBy(1.15); }
+      if (mod && (e.key === "-" || e.key === "_")) { e.preventDefault(); zoomBy(1 / 1.15); }
+      if (mod && e.key === "0") { e.preventDefault(); setScale(1.3); }
     };
+    // Ctrl + wheel / pinch zooms the PDF, not the whole app window.
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      zoomBy(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025)));
+    };
+    const stop = (e: Event) => e.preventDefault();
     addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    addEventListener("wheel", onWheel, { passive: false });
+    for (const g of ["gesturestart", "gesturechange", "gestureend"]) addEventListener(g, stop);
+    return () => {
+      removeEventListener("keydown", onKey);
+      removeEventListener("wheel", onWheel);
+      for (const g of ["gesturestart", "gesturechange", "gestureend"]) removeEventListener(g, stop);
+    };
   });
 
   if (f.missing) return <Missing app="pdf" />;
   if (!f.data || !f.meta) return <div className="loading">Loading…</div>;
   const data = f.data;
 
-  const update = (aid: string, patch: Partial<Ann>) => f.setData((d) => ({ ...d, anns: d.anns.map((a) => (a.id === aid ? { ...a, ...patch } : a)) }));
+  const update = (aid: string, patch: Partial<Ann>) => mutate((d) => ({ ...d, anns: d.anns.map((a) => (a.id === aid ? { ...a, ...patch } : a)) }), `u:${aid}`);
   const add = (a: Omit<Ann, "id">) => {
     const ann = { ...a, id: uid() };
-    f.setData((d) => ({ ...d, anns: [...d.anns, ann] }));
+    mutate((d) => ({ ...d, anns: [...d.anns, ann] }));
     setSelected(ann.id);
     return ann;
   };
   /** Removing replacement text also removes its white patch, so the original words show again. */
   function remove(aid: string) {
-    f.setData((d) => {
+    mutate((d) => {
       const cover = d.anns.find((a) => a.id === aid)?.cover;
       return { ...d, anns: d.anns.filter((a) => a.id !== aid && a.id !== cover) };
     });
@@ -265,7 +342,7 @@ export default function Pdf({ id }: { id: string }) {
   }
 
   /** Turn a line already on the page into editable text: hide it under white and type over it. */
-  async function editRun(page: number, run: TextRun, all: TextRun[]) {
+  async function makeEdit(page: number, run: TextRun, all: TextRun[], newText?: string): Promise<[Ann, Ann]> {
     const block = blockAt(all, run);
     const nameOf = new Map<string, string>();
     try {
@@ -299,7 +376,16 @@ export default function Pdf({ id }: { id: string }) {
       id: uid(), page, type: "text", x: block.x, y: block.baseline - bl, w: 0, h: 0, text: block.text, spans,
       size, font, bold, color: "#000000", cover: cover.id, bl, lead: block.lead,
     };
-    f.setData((d) => ({ ...d, anns: [...d.anns, cover, text] }));
+    if (newText !== undefined) {
+      text.text = newText;
+      text.spans = newText.split("\n").map((t) => [{ t, b: bold }]);
+    }
+    return [cover, text];
+  }
+
+  async function editRun(page: number, run: TextRun, all: TextRun[]) {
+    const [cover, text] = await makeEdit(page, run, all);
+    mutate((d) => ({ ...d, anns: [...d.anns, cover, text] }));
     setSelected(text.id);
     setFocusText(text.id);
   }
@@ -354,7 +440,7 @@ export default function Pdf({ id }: { id: string }) {
     try {
       const next = await op();
       setSelected(null);
-      f.setData((d) => ({ ...d, bytes: next, anns: mapAnns(d.anns) }));
+      mutate((d) => ({ ...d, bytes: next, anns: mapAnns(d.anns) }));
     } catch (e) {
       toast(errorText(e), "error");
     } finally {
@@ -390,8 +476,92 @@ export default function Pdf({ id }: { id: string }) {
     }
   }
 
+  /** Send the request to Groq with the PDF's text and annotations, then apply its operations as one undo step. */
+  async function runAi(key: string, request: string, history: { role: "user" | "assistant"; content: string }[]) {
+    if (!doc) throw new Error("The PDF is still loading.");
+    const covers = new Set(data.anns.map((a) => a.cover).filter(Boolean));
+    const coverBoxes = data.anns.filter((a) => covers.has(a.id));
+    const blocks = new Map<string, { page: number; run: TextRun; all: TextRun[] }>();
+    const lines: string[] = [];
+    let n = 0;
+    for (let i = 0; i < sizes.length; i++) {
+      const all = await pageText(doc, i);
+      const seen = new Set<TextRun>();
+      for (const r of all) {
+        if (seen.has(r)) continue;
+        const b = blockAt(all, r);
+        b.runs.forEach((x) => seen.add(x));
+        const cx = b.box.x + b.box.w / 2;
+        const cy = b.box.y + b.box.h / 2;
+        // Words already replaced by an edit are hidden under a white patch; the edit stands in for them.
+        if (coverBoxes.some((c) => c.page === i && cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h)) continue;
+        const id = `p${i}b${n++}`;
+        blocks.set(id, { page: i, run: r, all });
+        lines.push(JSON.stringify({ id, page: i, x: Math.round(b.x), y: Math.round(b.box.y), text: b.text }));
+      }
+    }
+    const round = (v: number) => Math.round(v * 10) / 10;
+    const anns = data.anns
+      .filter((a) => !covers.has(a.id))
+      .map((a) => ({ id: a.id, page: a.page, type: a.type, x: round(a.x), y: round(a.y), w: round(a.w), h: round(a.h), x2: a.x2, y2: a.y2, text: a.text, size: a.size, color: a.color, thick: a.thick }));
+    const context = [
+      `Pages (width x height in points): ${sizes.map((z, i) => `${i}: ${Math.round(z.w)}x${Math.round(z.h)}`).join(", ")}`,
+      `Blocks:\n${lines.join("\n").slice(0, 14000)}`,
+      `Annotations:\n${JSON.stringify(anns).slice(0, 4000)}`,
+    ].join("\n\n");
+
+    const out = await askAi(key, context, history, request);
+    const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+    const color = (v: unknown) => (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : undefined);
+    const pageOk = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v < sizes.length;
+
+    const edits = new Map<string, string>();
+    for (const op of out.ops) if (op.op === "edit_text" && blocks.has(op.block) && typeof op.text === "string") edits.set(op.block, op.text);
+    const made: [Ann, Ann][] = [];
+    for (const [block, text] of edits) {
+      const b = blocks.get(block)!;
+      made.push(await makeEdit(b.page, b.run, b.all, text));
+    }
+
+    let applied = made.length;
+    mutate((d) => {
+      let list = [...d.anns];
+      const fresh: Ann[] = [];
+      for (const [cover, text] of made) fresh.push(cover, text);
+      const apply = (op: AiOp) => {
+        if (op.op === "add_text" && pageOk(op.page) && typeof op.text === "string") {
+          fresh.push({ id: uid(), page: op.page, type: "text", x: num(op.x, 72), y: num(op.y, 72), w: 0, h: 0, text: op.text, size: num(op.size, 14), font: "helv", bold: !!op.bold, color: color(op.color) ?? "#000000" });
+        } else if (op.op === "add_shape" && pageOk(op.page) && ["rect", "line", "highlight", "whiteout", "redact"].includes(op.type)) {
+          const x = num(op.x, 72);
+          const y = num(op.y, 72);
+          const base = { id: uid(), page: op.page, type: op.type, x, y, w: Math.max(1, num(op.w, 100)), h: Math.max(1, num(op.h, 20)), color: color(op.color) ?? (op.type === "highlight" ? "#ffeb3b" : op.type === "whiteout" ? "#ffffff" : op.type === "rect" ? "#e53935" : "#000000"), thick: typeof op.thick === "number" ? op.thick : undefined } as Ann;
+          if (op.type === "line") Object.assign(base, { w: 0, h: 0, x2: num(op.x2, x + 100), y2: num(op.y2, y) });
+          fresh.push(base);
+        } else if (op.op === "update") {
+          const i = list.findIndex((a) => a.id === op.id);
+          if (i < 0) return false;
+          const a = list[i];
+          const patch: Partial<Ann> = {};
+          for (const k of ["x", "y", "w", "h", "x2", "y2", "size", "thick"] as const) if (typeof op[k] === "number") patch[k] = op[k];
+          if (color(op.color)) patch.color = color(op.color);
+          if (typeof op.bold === "boolean") patch.bold = op.bold;
+          if (typeof op.text === "string" && a.type === "text") Object.assign(patch, { text: op.text, spans: a.spans ? op.text.split("\n").map((t) => [{ t, b: a.bold }]) : undefined });
+          list[i] = { ...a, ...patch };
+        } else if (op.op === "delete") {
+          const a = list.find((x) => x.id === op.id);
+          if (!a) return false;
+          list = list.filter((x) => x.id !== a.id && x.id !== a.cover);
+        } else return op.op === "edit_text";
+        return true;
+      };
+      for (const op of out.ops) if (op.op !== "edit_text" && apply(op)) applied++;
+      return { ...d, anns: [...list, ...fresh] };
+    });
+    return `${out.reply || (applied ? "Done." : "Nothing to change.")}${applied ? ` (${applied} change${applied === 1 ? "" : "s"} — Ctrl Z undoes all)` : ""}`;
+  }
+
   const fieldValue = (fi: FieldInfo) => (fi.name in data.fields ? data.fields[fi.name] : fi.value);
-  const setField = (name: string, v: string | boolean) => f.setData((d) => ({ ...d, fields: { ...d.fields, [name]: v } }));
+  const setField = (name: string, v: string | boolean) => mutate((d) => ({ ...d, fields: { ...d.fields, [name]: v } }), `f:${name}`);
 
   return (
     <div className="app-page pdf">
@@ -408,9 +578,12 @@ export default function Pdf({ id }: { id: string }) {
           </button>
         ))}
         <span className="grow" />
-        <button onClick={() => setScale((s) => Math.max(0.4, s - 0.2))} title="Zoom out (Ctrl -)"><ZoomOut /></button>
+        <button onClick={undo} title="Undo (Ctrl Z)"><Undo2 /></button>
+        <button onClick={redo} title="Redo (Ctrl Y)"><Redo2 /></button>
+        <button onClick={() => zoomBy(1 / 1.15)} title="Zoom out (Ctrl -)"><ZoomOut /></button>
         <span className="zoom">{Math.round(scale * 100)}%</span>
-        <button onClick={() => setScale((s) => Math.min(4, s + 0.2))} title="Zoom in (Ctrl +)"><ZoomIn /></button>
+        <button onClick={() => zoomBy(1.15)} title="Zoom in (Ctrl +)"><ZoomIn /></button>
+        <button className={showAi ? "on" : ""} onClick={() => setShowAi(!showAi)} title="Ask AI to edit this PDF"><Sparkles /> AI</button>
         {fields.length > 0 && <button className={showFields ? "on" : ""} onClick={() => setShowFields(!showFields)}>Form fields ({fields.length})</button>}
       </div>
       {sel && (
@@ -428,7 +601,12 @@ export default function Pdf({ id }: { id: string }) {
               <button className={sel.bold ? "on" : ""} onClick={() => restyle(sel, { bold: !sel.bold })}><b>B</b></button>
             </>
           )}
-          <button onClick={() => add({ ...sel, x: sel.x + 12, y: sel.y + 12 })}>Duplicate</button>
+          {(sel.type === "line" || sel.type === "rect") && (
+            <select value={sel.thick ?? (sel.type === "line" ? 1.5 : 2)} title="Thickness" onChange={(e) => update(sel.id, { thick: Number(e.target.value) })}>
+              {[...new Set([0.5, 1, 1.5, 2, 3, 4, 6, 8, sel.thick ?? (sel.type === "line" ? 1.5 : 2)])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
+            </select>
+          )}
+          <button onClick={() => add({ ...sel, x: sel.x + 12, y: sel.y + 12, x2: sel.x2 === undefined ? undefined : sel.x2 + 12, y2: sel.y2 === undefined ? undefined : sel.y2 + 12 })}>Duplicate</button>
           <button onClick={() => remove(sel.id)}>Delete</button>
         </div>
       )}
@@ -481,6 +659,7 @@ export default function Pdf({ id }: { id: string }) {
               </div>
             ))}
         </div>
+        {showAi && <AiPanel onAsk={runAi} onClose={() => setShowAi(false)} />}
         {showFields && fields.length > 0 && (
           <aside className="fields">
             <h3>Form fields</h3>
@@ -527,6 +706,76 @@ export default function Pdf({ id }: { id: string }) {
   );
 }
 
+type Chat = { role: "user" | "assistant"; content: string; error?: boolean };
+
+function AiPanel({ onAsk, onClose }: { onAsk: (key: string, request: string, history: { role: "user" | "assistant"; content: string }[]) => Promise<string>; onClose: () => void }) {
+  const [key, setKey] = useState<string | null | undefined>(undefined);
+  const [draftKey, setDraftKey] = useState("");
+  const [chat, setChat] = useState<Chat[]>([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const end = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    getGroqKey().then((k) => setKey(k || null));
+  }, []);
+  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [chat, busy]);
+
+  async function send() {
+    const request = text.trim();
+    if (!request || busy || !key) return;
+    const history = chat.filter((m) => !m.error).slice(-6).map(({ role, content }) => ({ role, content }));
+    setChat((c) => [...c, { role: "user", content: request }]);
+    setText("");
+    setBusy(true);
+    try {
+      const reply = await onAsk(key, request, history);
+      setChat((c) => [...c, { role: "assistant", content: reply }]);
+    } catch (e) {
+      setChat((c) => [...c, { role: "assistant", content: errorText(e), error: true }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <aside className="fields ai">
+      <div className="ai-head">
+        <h3><Sparkles size={14} /> Ask AI</h3>
+        <span className="grow" />
+        {key && <button className="icon" title="Change Groq API key" onClick={() => { setDraftKey(""); setKey(null); }}>Key</button>}
+        <button className="icon" title="Close" onClick={onClose}><XIcon size={14} /></button>
+      </div>
+      {key === undefined ? null : !key ? (
+        <>
+          <p className="muted">Paste a Groq API key to use this. It stays on this computer and is sent only to Groq.</p>
+          <input type="password" placeholder="gsk_…" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && draftKey.trim()) { setGroqKey(draftKey); setKey(draftKey.trim()); } }} />
+          <button className="primary" disabled={!draftKey.trim()} onClick={() => { setGroqKey(draftKey); setKey(draftKey.trim()); }}>Save key</button>
+        </>
+      ) : (
+        <>
+          <div className="ai-chat">
+            {!chat.length && <p className="muted">Tell me what to change. For example: “change the date to 5 May 2026”, “black out the phone number”, “add a red box around the total”, “underline the title”.</p>}
+            {chat.map((m, i) => <div key={i} className={`ai-msg ${m.role}${m.error ? " error" : ""}`}>{m.content}</div>)}
+            {busy && <div className="ai-msg assistant muted">Working…</div>}
+            <div ref={end} />
+          </div>
+          <div className="ai-input">
+            <textarea
+              rows={3}
+              placeholder="Ask AI to edit this PDF…"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            />
+            <button className="primary" disabled={busy || !text.trim()} onClick={send} title="Send (Enter)"><Send size={14} /></button>
+          </div>
+        </>
+      )}
+    </aside>
+  );
+}
+
 function PageView(props: {
   doc: PDFDocumentProxy;
   index: number;
@@ -537,7 +786,7 @@ function PageView(props: {
   selected: string | null;
   onSelect: (id: string | null) => void;
   onPlace: (x: number, y: number) => void;
-  onDraw: (r: { x: number; y: number; w: number; h: number }) => void;
+  onDraw: (r: { x: number; y: number; w: number; h: number; x2?: number; y2?: number }) => void;
   onChange: (id: string, patch: Partial<Ann>) => void;
   onRemove: (id: string) => void;
   onEditRun: (run: TextRun, all: TextRun[]) => void;
@@ -627,17 +876,25 @@ function PageView(props: {
       onPointerUp={() => {
         if (!draft) return;
         let r = { x: Math.min(draft.x0, draft.x), y: Math.min(draft.y0, draft.y), w: Math.abs(draft.x - draft.x0), h: Math.abs(draft.y - draft.y0) };
-        if (tool === "line") r = { x: r.x, y: draft.y0 - 4, w: r.w, h: 8 };
-        if (r.w < 4 && r.h < 4) r = { x: draft.x0 - 50, y: draft.y0 - 8, w: 100, h: tool === "line" ? 8 : 16 };
         setDraft(null);
+        if (tool === "line") {
+          const far = Math.hypot(draft.x - draft.x0, draft.y - draft.y0) >= 4;
+          return props.onDraw({ x: draft.x0, y: draft.y0, w: 0, h: 0, x2: far ? draft.x : draft.x0 + 100, y2: far ? draft.y : draft.y0 });
+        }
+        if (r.w < 4 && r.h < 4) r = { x: draft.x0 - 50, y: draft.y0 - 8, w: 100, h: 16 };
         props.onDraw(r);
       }}
     >
       <canvas ref={canvas} style={{ width: size.w * scale, height: size.h * scale }} />
-      {draft && (
+      {draft && tool === "line" && (
+        <svg className="draft-line" width={size.w * scale} height={size.h * scale}>
+          <line x1={draft.x0 * scale} y1={draft.y0 * scale} x2={draft.x * scale} y2={draft.y * scale} stroke="#111" strokeWidth={1.5 * scale} strokeLinecap="round" />
+        </svg>
+      )}
+      {draft && tool !== "line" && (
         <div
           className={"draft " + tool}
-          style={{ left: Math.min(draft.x0, draft.x) * scale, top: Math.min(draft.y0, draft.y) * scale, width: Math.abs(draft.x - draft.x0) * scale, height: tool === "line" ? 2 : Math.abs(draft.y - draft.y0) * scale }}
+          style={{ left: Math.min(draft.x0, draft.x) * scale, top: Math.min(draft.y0, draft.y) * scale, width: Math.abs(draft.x - draft.x0) * scale, height: Math.abs(draft.y - draft.y0) * scale }}
         />
       )}
       {tool === "select" &&
@@ -693,6 +950,10 @@ function readSpans(root: HTMLElement): Span[][] {
   return lines;
 }
 
+type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+const HANDLES: [Handle, number, number][] = [["nw", 0, 0], ["n", 50, 0], ["ne", 100, 0], ["e", 100, 50], ["se", 100, 100], ["s", 50, 100], ["sw", 0, 100], ["w", 0, 50]];
+const CURSOR: Record<Handle, string> = { n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", ne: "nesw-resize", sw: "nesw-resize", nw: "nwse-resize", se: "nwse-resize" };
+
 const TEXT_EDGE = 6; // px of draggable border around a text box
 
 function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void }) {
@@ -717,18 +978,53 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function drag(e: React.PointerEvent, mode: "move" | "resize") {
+  // Undo / redo changes the words from outside: copy them into the box unless it already shows them.
+  useEffect(() => {
+    const el = text.current;
+    if (a.type !== "text" || !el) return;
+    const shown = a.spans ? readSpans(el).map((l) => l.map((x) => x.t).join("")).join("\n") : el.innerText.replace(/\n$/, "");
+    if (shown === (a.text ?? "")) return;
+    if (a.spans) el.innerHTML = spansToHtml(a.spans);
+    else el.innerText = a.text ?? "";
+  }, [a.type, a.text, a.spans]);
+
+  function drag(e: React.PointerEvent, mode: "move" | "p1" | "p2" | "rotate" | Handle) {
     e.stopPropagation();
     const start = { x: e.clientX, y: e.clientY, a: { x: a.x, y: a.y, w: a.w, h: a.h } };
+    const rot = ((a.rot ?? 0) * Math.PI) / 180;
+    const box = (e.currentTarget as HTMLElement).closest(".ann")!.getBoundingClientRect();
+    const center = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
     const keepRatio = a.type === "image" || a.type === "check" || a.type === "cross";
     let last: Partial<Ann> = {};
     const move = (ev: PointerEvent) => {
       const dx = (ev.clientX - start.x) / scale;
       const dy = (ev.clientY - start.y) / scale;
-      if (mode === "move") last = { x: start.a.x + dx, y: start.a.y + dy };
-      else {
-        const w = Math.max(6, start.a.w + dx);
-        last = { w, h: keepRatio ? (w * start.a.h) / start.a.w : Math.max(a.type === "line" ? 4 : 6, start.a.h + dy) };
+      if (a.type === "line") {
+        const [x1, y1, x2, y2] = lineEnds(a);
+        last = mode === "p1" ? { x: x1 + dx, y: y1 + dy, x2, y2 } : mode === "p2" ? { x: x1, y: y1, x2: x2 + dx, y2: y2 + dy } : { x: x1 + dx, y: y1 + dy, x2: x2 + dx, y2: y2 + dy };
+      } else if (mode === "move") last = { x: start.a.x + dx, y: start.a.y + dy };
+      else if (mode === "rotate") {
+        let deg = (Math.atan2(ev.clientY - center.y, ev.clientX - center.x) * 180) / Math.PI + 90;
+        if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+        last = { rot: Math.round(((deg % 360) + 360) % 360 * 10) / 10 };
+      } else {
+        // Resize in the box's own (turned) frame; the opposite side stays where it is.
+        const lx = dx * Math.cos(rot) + dy * Math.sin(rot);
+        const ly = -dx * Math.sin(rot) + dy * Math.cos(rot);
+        const sx = mode.includes("e") ? 1 : mode.includes("w") ? -1 : 0;
+        const sy = mode.includes("s") ? 1 : mode.includes("n") ? -1 : 0;
+        const { w, h } = start.a;
+        let dw = sx ? Math.max(6 - w, sx * lx) : 0;
+        let dh = sy ? Math.max(6 - h, sy * ly) : 0;
+        if (keepRatio) {
+          dw = Math.max(6, w + sx * lx) - w;
+          dh = (dw * h) / w;
+        }
+        const ox = (sx * dw) / 2;
+        const oy = (sy * dh) / 2;
+        const cx = start.a.x + w / 2 + ox * Math.cos(rot) - oy * Math.sin(rot);
+        const cy = start.a.y + h / 2 + ox * Math.sin(rot) + oy * Math.cos(rot);
+        last = { x: cx - (w + dw) / 2, y: cy - (h + dh) / 2, w: w + dw, h: h + dh };
       }
       setLive(last);
     };
@@ -743,8 +1039,15 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
   }
 
   // Text boxes get a thin border zone (outside the typing area) that drags the box; the text itself stays put.
-  const box: React.CSSProperties = a.type === "text" ? { left: v.x * scale - TEXT_EDGE, top: v.y * scale - TEXT_EDGE, padding: TEXT_EDGE, cursor: "move" } : { left: v.x * scale, top: v.y * scale };
-  if (a.type !== "text") Object.assign(box, { width: v.w * scale, height: v.h * scale });
+  const LINE_PAD = 10;
+  const [lx1, ly1, lx2, ly2] = lineEnds(v);
+  const box: React.CSSProperties = a.type === "line"
+    ? { left: Math.min(lx1, lx2) * scale - LINE_PAD, top: Math.min(ly1, ly2) * scale - LINE_PAD, width: Math.abs(lx2 - lx1) * scale + LINE_PAD * 2, height: Math.abs(ly2 - ly1) * scale + LINE_PAD * 2 }
+    : a.type === "text" ? { left: v.x * scale - TEXT_EDGE, top: v.y * scale - TEXT_EDGE, padding: TEXT_EDGE, cursor: "move" } : { left: v.x * scale, top: v.y * scale };
+  if (a.type !== "text" && a.type !== "line") Object.assign(box, { width: v.w * scale, height: v.h * scale });
+  if (v.rot) box.transform = `rotate(${v.rot}deg)`;
+  const keepShape = a.type === "image" || a.type === "check" || a.type === "cross";
+  const turnable = a.type !== "text" && a.type !== "line" && a.type !== "redact";
 
   let body: React.ReactNode = null;
   switch (a.type) {
@@ -780,7 +1083,17 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
       );
       break;
     case "line":
-      body = <div className="ann-line" style={{ background: a.color }} />;
+      {
+        const ox = Math.min(lx1, lx2) * scale - LINE_PAD;
+        const oy = Math.min(ly1, ly2) * scale - LINE_PAD;
+        const p = [lx1 * scale - ox, ly1 * scale - oy, lx2 * scale - ox, ly2 * scale - oy];
+        body = (
+          <svg className="ann-line-svg" width="100%" height="100%">
+            <line x1={p[0]} y1={p[1]} x2={p[2]} y2={p[3]} stroke="transparent" strokeWidth={Math.max(14, (v.thick ?? 1.5) * scale)} strokeLinecap="round" />
+            <line x1={p[0]} y1={p[1]} x2={p[2]} y2={p[3]} stroke={v.color ?? "#000000"} strokeWidth={(v.thick ?? 1.5) * scale} strokeLinecap="round" />
+          </svg>
+        );
+      }
       break;
     default:
       body = null;
@@ -789,14 +1102,24 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
   return (
     <div
       className={`ann ann-${a.type}` + (selected ? " sel" : "")}
-      style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : a.type === "rect" ? { borderColor: a.color } : {}) }}
+      style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : a.type === "rect" ? { borderColor: a.color, borderWidth: (a.thick ?? 2) * scale } : {}) }}
       onPointerDown={(e) => { if (a.type === "text" && e.target !== e.currentTarget) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
     >
       {body}
       {selected && (
         <>
           {a.type === "text" && <span className="grip" title="Drag to move" onPointerDown={(e) => { e.preventDefault(); drag(e, "move"); }}><GripVertical size={14} /></span>}
-          {a.type !== "text" && <span className="resize" onPointerDown={(e) => drag(e, "resize")} />}
+          {a.type === "line" && (
+            <>
+              <span className="handle" style={{ left: lx1 * scale - Math.min(lx1, lx2) * scale + LINE_PAD, top: ly1 * scale - Math.min(ly1, ly2) * scale + LINE_PAD }} onPointerDown={(e) => { e.preventDefault(); drag(e, "p1"); }} />
+              <span className="handle" style={{ left: lx2 * scale - Math.min(lx1, lx2) * scale + LINE_PAD, top: ly2 * scale - Math.min(ly1, ly2) * scale + LINE_PAD }} onPointerDown={(e) => { e.preventDefault(); drag(e, "p2"); }} />
+            </>
+          )}
+          {a.type !== "text" && a.type !== "line" &&
+            HANDLES.filter(([h]) => !keepShape || h.length === 2).map(([h, l, t]) => (
+              <span key={h} className="resize" style={{ left: `${l}%`, top: `${t}%`, cursor: CURSOR[h] }} onPointerDown={(e) => { e.preventDefault(); drag(e, h); }} />
+            ))}
+          {turnable && <span className="rotate" title="Drag to turn (hold Shift for steps)" onPointerDown={(e) => { e.preventDefault(); drag(e, "rotate"); }} />}
           <button className="ann-del" title="Delete" onPointerDown={(e) => e.stopPropagation()} onClick={onRemove}><XIcon size={12} /></button>
         </>
       )}
