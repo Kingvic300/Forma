@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { PDFDocument } from "pdf-lib";
 import { linkifyElement, linkifyHtml } from "./links";
 import { createFile, type Kind } from "./store";
 import type { Sheet, SheetsData } from "../apps/sheets/types";
@@ -17,6 +18,14 @@ export const ACCEPT: Record<Kind | "all", string> = {
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const base = (name: string) => name.replace(/\.[^.]+$/, "");
+
+/** A new PDF with one empty A4 page, ready to write on. */
+export async function blankPdf(name = "Untitled PDF") {
+  const pdf = await PDFDocument.create();
+  pdf.addPage([595.28, 841.89]);
+  const data: PdfData = { bytes: await pdf.save(), anns: [], fields: {} };
+  return createFile("pdf", name, data);
+}
 
 export function blank(kind: Kind): unknown {
   switch (kind) {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FolderOpen, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { askConfirm, askText, toast } from "./lib/dialog";
-import { blank } from "./lib/importers";
+import { blank, blankPdf } from "./lib/importers";
 import { APPS, go, type AppId } from "./lib/route";
 import { createFile, deleteFile, saveMeta, useFiles, type Kind, type Meta } from "./lib/store";
 import { AppIcon, Menu, timeAgo } from "./ui";
@@ -11,7 +11,7 @@ const NEW: Record<Kind, { label: string; name: string }> = {
   sheets: { label: "New spreadsheet", name: "Untitled spreadsheet" },
   forms: { label: "New form", name: "Untitled form" },
   tracker: { label: "New tracker", name: "My tracker" },
-  pdf: { label: "Open a PDF", name: "" },
+  pdf: { label: "New blank PDF", name: "Untitled PDF" },
 };
 const KIND_NAME: Record<Kind, string> = { docs: "Document", sheets: "Spreadsheet", forms: "Form", pdf: "PDF", tracker: "Tracker" };
 const EMPTY: Record<AppId, [string, string]> = {
@@ -19,7 +19,7 @@ const EMPTY: Record<AppId, [string, string]> = {
   docs: ["No documents yet", "Start a blank document, or open a Word, HTML, text or Markdown file to keep editing it here."],
   sheets: ["No spreadsheets yet", "Start a blank spreadsheet, or open a CSV or Excel file. Formulas like =SUM(A1:A9) work as you’d expect."],
   forms: ["No forms yet", "Build a form, fill it in on this computer, and see the responses as charts or in a spreadsheet."],
-  pdf: ["No PDFs yet", "Open a PDF to add text, fill its fields, sign it, or merge and reorder pages."],
+  pdf: ["No PDFs yet", "Open a PDF to add text, fill its fields, sign it, or merge and reorder pages. Or start a blank one and write on it."],
   tracker: ["No trackers yet", "Keep a list of tasks, tick off daily habits, and write a short note about each day."],
 };
 
@@ -31,8 +31,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
   const info = APPS.find((a) => a.id === app)!;
 
   async function create(k: Kind) {
-    if (k === "pdf") return onOpenFile();
-    go(`/${k}/${await createFile(k, NEW[k].name, blank(k))}`);
+    go(`/${k}/${k === "pdf" ? await blankPdf(NEW.pdf.name) : await createFile(k, NEW[k].name, blank(k))}`);
   }
   async function rename(f: Meta) {
     const n = await askText("Rename file", { value: f.name, confirmLabel: "Rename" });
@@ -45,7 +44,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
   }
 
   const shown = (files ?? []).filter((f) => f.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const creatable: Kind[] = kind ? (kind === "pdf" ? [] : [kind]) : ["docs", "sheets", "tracker"];
+  const creatable: Kind[] = kind ? [kind] : ["docs", "sheets", "pdf", "tracker"];
 
   return (
     <div
@@ -118,7 +117,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
                   <Plus /> {NEW[k].label}
                 </button>
               ))}
-              <button onClick={onOpenFile} className={kind === "pdf" ? "primary" : ""}>
+              <button onClick={onOpenFile}>
                 <FolderOpen /> {kind === "pdf" ? "Open a PDF" : "Open from computer"}
               </button>
             </div>

@@ -8,7 +8,7 @@ import { findLinks, isSafeHref, openLink } from "../../lib/links";
 import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
 import { uid } from "../../lib/store";
-import { Missing, TitleBar } from "../../ui";
+import { Missing, TitleBar, usePane } from "../../ui";
 import { rasterizePage } from "./redact";
 import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields, type FieldInfo } from "./exportPdf";
 import { imageToPng, SignaturePad } from "./SignaturePad";
@@ -212,6 +212,10 @@ export default function Pdf({ id }: { id: string }) {
   const keepView = useRef<{ x: number; y: number } | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const mergeInput = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const pane = usePane();
+  const beforeSplit = useRef<number | null>(null);
   const bytes = f.data?.bytes;
 
   useEffect(() => {
@@ -237,6 +241,23 @@ export default function Pdf({ id }: { id: string }) {
       task.destroy();
     };
   }, [bytes]);
+
+  // Side by side, fit the pages to the narrower pane; closing it brings back the zoom from before.
+  const loaded = sizes.length > 0;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!loaded || !el) return;
+    if (pane.split && beforeSplit.current === null) {
+      const fit = Math.max(0.4, (el.clientWidth - 48) / Math.max(...sizes.map((z) => z.w)));
+      setScale((s) => {
+        beforeSplit.current = s;
+        return Math.min(s, fit);
+      });
+    } else if (!pane.split && beforeSplit.current !== null) {
+      setScale(beforeSplit.current);
+      beforeSplit.current = null;
+    }
+  }, [pane.split, loaded]);
 
   /** Every change to the file goes through here so Ctrl+Z can take it back. Quick repeats with one key (typing) share a step. */
   const mutate = (fn: (d: PdfData) => PdfData, key = "") => {
@@ -272,13 +293,13 @@ export default function Pdf({ id }: { id: string }) {
 
   // No rounding: trackpad pinch sends tiny steps that would round back to the same zoom.
   const zoomBy = (factor: number) => {
-    const el = document.querySelector<HTMLElement>(".pdf-scroll");
+    const el = scroller.current;
     if (el) keepView.current = { x: (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth, y: (el.scrollTop + el.clientHeight / 2) / el.scrollHeight };
     setScale((s) => Math.min(4, Math.max(0.4, s * factor)));
   };
   // Keep the same spot of the document in view after the pages change size.
   useLayoutEffect(() => {
-    const el = document.querySelector<HTMLElement>(".pdf-scroll");
+    const el = scroller.current;
     const v = keepView.current;
     if (!el || !v) return;
     keepView.current = null;
@@ -288,6 +309,8 @@ export default function Pdf({ id }: { id: string }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Side by side, shortcuts go to the pane used last.
+      if (pane.split && !pane.active) return;
       const el = e.target as HTMLElement;
       const editing = el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
       const mod = e.ctrlKey || e.metaKey;
@@ -307,6 +330,9 @@ export default function Pdf({ id }: { id: string }) {
     // Ctrl + wheel / pinch zooms the PDF, not the whole app window.
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
+      // Side by side, each PDF zooms only under the pointer; the main one also takes the rest of the window.
+      const t = e.target as HTMLElement;
+      if (pane.split && !root.current?.contains(t) && (pane.side || t.closest?.(".app-page"))) return;
       e.preventDefault();
       zoomBy(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025)));
     };
@@ -564,7 +590,7 @@ export default function Pdf({ id }: { id: string }) {
   const setField = (name: string, v: string | boolean) => mutate((d) => ({ ...d, fields: { ...d.fields, [name]: v } }), `f:${name}`);
 
   return (
-    <div className="app-page pdf">
+    <div className="app-page pdf" ref={root}>
       <TitleBar meta={f.meta} onRename={f.rename} saved={f.saved} app="pdf">
         {busy && <span className="muted">{busy}</span>}
         <button onClick={() => mergeInput.current?.click()} title="Add all pages of another PDF to the end of this one">Add pages from a PDF…</button>
@@ -627,7 +653,7 @@ export default function Pdf({ id }: { id: string }) {
         </div>
       )}
       <div className="pdf-body">
-        <div className="pdf-scroll">
+        <div className="pdf-scroll" ref={scroller}>
           {error && <div className="empty"><p>{error}</p></div>}
           {doc &&
             sizes.map((size, i) => (

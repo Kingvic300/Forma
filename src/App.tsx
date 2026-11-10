@@ -3,13 +3,13 @@ import { ChevronsUpDown, Download, FolderOpen, Search, Settings, X } from "lucid
 import Home from "./Home";
 import { CommandPalette } from "./CommandPalette";
 import { DialogHost, errorText, toast } from "./lib/dialog";
-import { ACCEPT, importFile } from "./lib/importers";
+import { ACCEPT, blank, blankPdf, importFile } from "./lib/importers";
 import { isTauri, onFilesOpened, takeLaunchFiles, toggleFullscreen } from "./lib/platform";
 import { APPS, go, NAV_APPS, switchTo, useRoute, type AppId } from "./lib/route";
 import { getOnlineConfig, type OnlineConfig } from "./lib/online";
-import { getSetting, setSetting, useFiles, type Meta } from "./lib/store";
+import { createFile, getSetting, setSetting, useFiles, type Meta } from "./lib/store";
 import { OnlineSetup } from "./OnlineSetup";
-import { AppIcon, AppSwitcher, CLOSE_FILE, Logo, Modal, Spinner } from "./ui";
+import { AppIcon, AppSwitcher, CLOSE_FILE, closeOpenFile, Logo, Modal, PaneContext, Spinner, timeAgo } from "./ui";
 import { UpdateBanner, useUpdater } from "./Updater";
 import { FormView } from "./apps/forms/FormFill";
 import pkg from "../package.json";
@@ -29,6 +29,7 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const info = APPS.find((a) => a.id === app)!;
   const tabs = useOpenFiles(id, app);
+  const split = useSplit(id, tabs.all);
 
   const openFiles = useCallback(async (list: File[]) => {
     let last: { kind: string; id: string } | null = null;
@@ -64,7 +65,11 @@ export default function App() {
         setAbout(true);
       } else if (k === "w" && !e.shiftKey && id) {
         e.preventDefault();
-        tabs.close(id);
+        if (split.meta && split.active === "side") split.close();
+        else tabs.close(id);
+      } else if (e.key === "\\" && id) {
+        e.preventDefault();
+        split.toggle();
       }
     };
     addEventListener("keydown", onKey);
@@ -143,23 +148,38 @@ export default function App() {
       </aside>
       <div className="content">
         <main>
-          <Suspense fallback={<div className="loading"><Spinner /></div>}>
-            {!id ? (
+          {!id || app === "drive" ? (
+            <Suspense fallback={<div className="loading"><Spinner /></div>}>
               <Home app={app} onOpenFile={() => fileInput.current?.click()} onDropFiles={openFiles} />
-            ) : app === "docs" ? (
-              <Docs key={id} id={id} />
-            ) : app === "sheets" ? (
-              <Sheets key={id} id={id} />
-            ) : app === "forms" ? (
-              <Forms key={id} id={id} />
-            ) : app === "pdf" ? (
-              <Pdf key={id} id={id} />
-            ) : app === "tracker" ? (
-              <Tracker key={id} id={id} />
-            ) : (
-              <Home app={app} onOpenFile={() => fileInput.current?.click()} onDropFiles={openFiles} />
-            )}
-          </Suspense>
+            </Suspense>
+          ) : (
+            <div className={"split" + (split.meta ? " on" : "")}>
+              <PaneContext.Provider value={{ side: false, split: !!split.meta, active: !split.meta || split.active === "main", close: closeOpenFile, toggleSplit: split.toggle }}>
+                <div
+                  className={"pane" + (split.meta && split.active === "main" ? " active" : "")}
+                  style={split.meta ? { flexBasis: `${split.ratio * 100}%` } : undefined}
+                  onPointerDownCapture={() => split.setActive("main")}
+                  onFocusCapture={() => split.setActive("main")}
+                >
+                  <Suspense fallback={<div className="loading"><Spinner /></div>}>
+                    <Editor app={app} id={id} />
+                  </Suspense>
+                </div>
+              </PaneContext.Provider>
+              {split.meta && (
+                <>
+                  <Divider ratio={split.ratio} setRatio={split.setRatio} />
+                  <PaneContext.Provider value={{ side: true, split: true, active: split.active === "side", close: split.close }}>
+                    <div className="pane side" onPointerDownCapture={() => split.setActive("side")} onFocusCapture={() => split.setActive("side")}>
+                      <Suspense fallback={<div className="loading"><Spinner /></div>}>
+                        <Editor app={split.meta.kind} id={split.meta.id} />
+                      </Suspense>
+                    </div>
+                  </PaneContext.Provider>
+                </>
+              )}
+            </div>
+          )}
         </main>
         <footer className="statusbar-app">
           <span>Saved on this computer</span>
@@ -183,10 +203,176 @@ export default function App() {
         onSettings={() => setAbout(true)}
         onCheckUpdates={isTauri ? () => { setAbout(true); updater.check(true); } : undefined}
       />
+      {split.picking && id && <SidePicker current={id} files={tabs.all} onPick={split.open} onClose={() => split.setPicking(false)} />}
       <UpdateBanner updater={updater} />
       {about && <About onClose={() => setAbout(false)} updater={updater} />}
       <DialogHost />
     </div>
+  );
+}
+
+function Editor({ app, id }: { app: AppId; id: string }) {
+  switch (app) {
+    case "docs":
+      return <Docs key={id} id={id} />;
+    case "sheets":
+      return <Sheets key={id} id={id} />;
+    case "forms":
+      return <Forms key={id} id={id} />;
+    case "pdf":
+      return <Pdf key={id} id={id} />;
+    case "tracker":
+      return <Tracker key={id} id={id} />;
+    default:
+      return null;
+  }
+}
+
+const SIDE_KEY = "forma:side-file";
+const RATIO_KEY = "forma:side-ratio";
+
+const remember = (key: string, value: string | null) => {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable; the split then lasts until the window closes.
+  }
+};
+const recall = (key: string) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+/** The side-by-side view: a second file open next to the main one, each with its own editor. */
+function useSplit(current: string | undefined, files: Meta[] | null) {
+  const [side, setSide] = useState<string | null>(() => recall(SIDE_KEY));
+  const [ratio, setRatio] = useState(() => Number(recall(RATIO_KEY)) || 0.5);
+  const [active, setActive] = useState<"main" | "side">("main");
+  const [picking, setPicking] = useState(false);
+  const meta = side && current && side !== current ? files?.find((f) => f.id === side) : undefined;
+  // A new file reaches the list a moment after it is made, so only a file seen before can be "deleted".
+  const seen = useRef<string | null>(null);
+  if (side && files?.some((f) => f.id === side)) seen.current = side;
+
+  useEffect(() => remember(SIDE_KEY, side), [side]);
+  useEffect(() => remember(RATIO_KEY, String(ratio)), [ratio]);
+  // The side file was deleted, or opened in the main pane: one editor per file.
+  useEffect(() => {
+    if (side && (side === current || (files && seen.current === side && !files.some((f) => f.id === side)))) setSide(null);
+  }, [side, current, files]);
+
+  const close = () => {
+    setSide(null);
+    setActive("main");
+  };
+  const open = (fid: string) => {
+    setSide(fid);
+    setActive("side");
+    setPicking(false);
+  };
+  const toggle = () => (meta ? close() : setPicking(true));
+  return { meta, ratio, setRatio, active, setActive, picking, setPicking, open, close, toggle };
+}
+
+function Divider({ ratio, setRatio }: { ratio: number; setRatio: (r: number) => void }) {
+  const clamp = (r: number) => Math.min(0.8, Math.max(0.2, r));
+  function drag(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const box = e.currentTarget.parentElement!.getBoundingClientRect();
+    const move = (ev: PointerEvent) => setRatio(clamp((ev.clientX - box.left) / box.width));
+    const up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing");
+    };
+    document.body.classList.add("resizing");
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+  }
+  return (
+    <div
+      className="split-divider"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the two sides"
+      aria-valuenow={Math.round(ratio * 100)}
+      aria-valuemin={20}
+      aria-valuemax={80}
+      tabIndex={0}
+      title="Drag to resize. Double-click to make both sides equal."
+      onPointerDown={drag}
+      onDoubleClick={() => setRatio(0.5)}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          setRatio(clamp(ratio + (e.key === "ArrowLeft" ? -0.05 : 0.05)));
+        }
+      }}
+    />
+  );
+}
+
+/** Choose what opens next to the current file: a new blank PDF or document, or any saved file. */
+function SidePicker({ current, files, onPick, onClose }: { current: string; files: Meta[] | null; onPick: (id: string) => void; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const shown = (files ?? []).filter((f) => f.id !== current && f.name.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 30);
+
+  async function start(make: () => Promise<string>) {
+    setBusy(true);
+    try {
+      onPick(await make());
+    } catch (e) {
+      toast(errorText(e), "error");
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="Open side by side" onClose={onClose} wide>
+      <p className="muted small">Work on two files at once, for example edit one PDF while you write a new one.</p>
+      <div className="side-new">
+        <button disabled={busy} onClick={() => start(() => blankPdf())}>
+          <AppIcon app="pdf" size={22} /> New blank PDF
+        </button>
+        <button disabled={busy} onClick={() => start(() => createFile("docs", "Untitled document", blank("docs")))}>
+          <AppIcon app="docs" size={22} /> New document
+        </button>
+        <button disabled={busy} onClick={() => input.current?.click()}>
+          <FolderOpen /> Open from computer…
+        </button>
+      </div>
+      {!!files?.some((f) => f.id !== current) && (
+        <>
+          <input type="search" placeholder="Or find a file you already have" aria-label="Find a file" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
+          <div className="side-files">
+            {shown.map((f) => (
+              <button key={f.id} disabled={busy} onClick={() => onPick(f.id)}>
+                <AppIcon app={f.kind} size={18} />
+                <span className="fname">{f.name || "Untitled"}</span>
+                <span className="muted small">{timeAgo(f.updated)}</span>
+              </button>
+            ))}
+            {!shown.length && <p className="muted small">No files match “{query}”.</p>}
+          </div>
+        </>
+      )}
+      <input
+        ref={input}
+        type="file"
+        hidden
+        accept={ACCEPT.all}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) start(async () => (await importFile(file)).id);
+        }}
+      />
+    </Modal>
   );
 }
 
@@ -229,7 +415,7 @@ function useOpenFiles(current: string | undefined, app: AppId) {
       go(next ? `/${next.kind}/${next.id}` : `/${app}`);
     }
   };
-  return { open, close };
+  return { open, close, all: files };
 }
 
 function OpenFiles({ files, current, onClose }: { files: Meta[]; current?: string; onClose: (id: string) => void }) {

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, CircleCheckBig, FileSignature, FileText, Folder, ListChecks, Loader2, Sheet, X } from "lucide-react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronDown, CircleCheckBig, Columns2, FileSignature, FileText, Folder, ListChecks, Loader2, Sheet, X } from "lucide-react";
 import { APPS, go, NAV_APPS, type AppId } from "./lib/route";
 import type { Meta } from "./lib/store";
 
@@ -113,12 +113,27 @@ export function Menu({ label, children, align = "right" }: { label: ReactNode; c
 export const CLOSE_FILE = "forma:close-file";
 export const closeOpenFile = () => dispatchEvent(new Event(CLOSE_FILE));
 
+/** Where an editor is shown: the main pane, or the second pane of the side-by-side view. */
+export interface Pane {
+  side: boolean;
+  /** Two files are on screen. */
+  split: boolean;
+  /** This pane was used last, so keyboard shortcuts belong to it. */
+  active: boolean;
+  close: () => void;
+  /** Open or close the side-by-side view. Only the main pane has it. */
+  toggleSplit?: () => void;
+}
+export const PaneContext = createContext<Pane>({ side: false, split: false, active: true, close: closeOpenFile });
+export const usePane = () => useContext(PaneContext);
+
 /** The header of every open file: App / file name, save state, close, and the app's actions. */
 export function TitleBar({ meta, onRename, saved, app, children }: { meta: Meta; onRename: (n: string) => void; saved: boolean; app: AppId; children?: ReactNode }) {
   const name = APPS.find((a) => a.id === app)!.name;
+  const pane = usePane();
   return (
     <div className="titlebar">
-      <button className="crumb" title={`All ${name.toLowerCase()} files`} onClick={() => go(`/${app}`)}>
+      <button className="crumb" title={pane.side ? name : `All ${name.toLowerCase()} files`} disabled={pane.side} onClick={() => go(`/${app}`)}>
         <AppIcon app={app} size={20} />
         {name}
       </button>
@@ -128,11 +143,16 @@ export function TitleBar({ meta, onRename, saved, app, children }: { meta: Meta;
         {saved ? <Check /> : <Loader2 className="spin" />}
         {saved ? "Saved" : "Saving"}
       </span>
-      <button className="icon close-file" title="Close (Ctrl+W)" aria-label={`Close ${meta.name || "file"}`} onClick={closeOpenFile}>
+      <button className="icon close-file" title={pane.side ? "Close this side (Ctrl+W)" : "Close (Ctrl+W)"} aria-label={`Close ${meta.name || "file"}`} onClick={pane.close}>
         <X />
       </button>
       <span className="grow" />
       {children}
+      {pane.toggleSplit && (
+        <button className={"icon split-toggle" + (pane.split ? " on" : "")} title={pane.split ? "Close side by side (Ctrl+\\)" : "Side by side: open another file next to this one (Ctrl+\\)"} aria-pressed={pane.split} onClick={pane.toggleSplit}>
+          <Columns2 />
+        </button>
+      )}
     </div>
   );
 }
