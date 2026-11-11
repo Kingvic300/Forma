@@ -1,4 +1,4 @@
-export type AnnType = "text" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "check" | "cross" | "line" | "table";
+export type AnnType = "text" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "check" | "cross" | "line" | "table" | "ellipse";
 export type Font = "helv" | "times" | "courier" | "carlito";
 
 /** A piece of a line with one weight. */
@@ -8,6 +8,22 @@ export interface Span {
 }
 
 /** An annotation placed on a page. Coordinates are PDF points from the page's top-left. */
+export type Dash = "solid" | "dash" | "dot";
+
+/** Dash pattern for a stroke of width t (in the same unit as t). Dots rely on round caps. */
+export const dashArray = (d: Dash | undefined, t: number) => (d === "dash" ? [t * 3, t * 2] : d === "dot" ? [0.001, t * 2] : undefined);
+
+/** The three corners of an arrowhead at (x2, y2) for a line from (x1, y1), and where the line should stop under it. */
+export function arrowHead(x1: number, y1: number, x2: number, y2: number, t: number) {
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+  const [ux, uy] = [(x2 - x1) / len, (y2 - y1) / len];
+  const L = Math.min(len * 0.6, Math.max(8, t * 4));
+  const W = L * 0.55;
+  const bx = x2 - ux * L;
+  const by = y2 - uy * L;
+  return { tip: [x2, y2], left: [bx - uy * W, by + ux * W], right: [bx + uy * W, by - ux * W], stop: [x2 - ux * L * 0.8, y2 - uy * L * 0.8] };
+}
+
 export interface Ann {
   id: string;
   page: number;
@@ -34,6 +50,17 @@ export interface Ann {
   y2?: number;
   /** Stroke width in points for lines and boxes. */
   thick?: number;
+  /** Line style for lines, boxes and circles. */
+  dash?: Dash;
+  /** Arrowheads on a line's start (x, y) and end (x2, y2). */
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+  /** 0–1 for lines, boxes and circles. */
+  opacity?: number;
+  /** Fill colour inside a box or circle. */
+  fill?: string;
+  /** Extra outline drawn round each letter of a text box, in points: makes the text thicker. */
+  stroke?: number;
   /** Clockwise turn in degrees about the centre, for boxes, images and marks. */
   rot?: number;
   /** Table cell text, row by row. */

@@ -1,7 +1,7 @@
 import fontkit from "@pdf-lib/fontkit";
-import { degrees, PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
+import { degrees, LineCapStyle, popGraphicsState, PDFArray, pushGraphicsState, setLineWidth, setStrokingRgbColor, setTextRenderingMode, TextRenderingMode, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
 import { fontBytes } from "./fonts";
-import { CELL_PAD, cellBaseline, colsOf, HEAD_FILL, lineEnds, rowsOf, type Ann, type Font, type PdfData, type Span } from "./types";
+import { arrowHead, CELL_PAD, cellBaseline, colsOf, dashArray, HEAD_FILL, lineEnds, rowsOf, type Ann, type Font, type PdfData, type Span } from "./types";
 
 const hex = (h = "#000000") => {
   const n = parseInt(h.slice(1), 16);
@@ -132,7 +132,13 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
           const lead0 = span.t.match(/^\s*/)![0];
           x += f.widthOfTextAtSize(lead0, size);
           const t = span.t.slice(lead0.length);
-          if (t) page.drawText(t, { x, y: Y(a.y + bl + i * lead), size, font: f, color: hex(a.color) });
+          if (t && a.stroke) {
+            // Thicker text: fill each letter and stroke its outline in the same colour.
+            const c = hex(a.color);
+            page.pushOperators(pushGraphicsState(), setTextRenderingMode(TextRenderingMode.FillAndOutline), setLineWidth(a.stroke), setStrokingRgbColor(c.red, c.green, c.blue));
+            page.drawText(t, { x, y: Y(a.y + bl + i * lead), size, font: f, color: c });
+            page.pushOperators(popGraphicsState());
+          } else if (t) page.drawText(t, { x, y: Y(a.y + bl + i * lead), size, font: f, color: hex(a.color) });
           x += f.widthOfTextAtSize(t, size);
         }
       }
@@ -178,12 +184,43 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
         case "whiteout":
           page.drawRectangle({ ...corner, width: a.w, height: a.h, color: hex(a.color ?? "#ffffff") });
           break;
-        case "rect":
-          page.drawRectangle({ ...corner, width: a.w, height: a.h, borderColor: hex(a.color ?? "#e53935"), borderWidth: a.thick ?? 2 });
+        case "rect": {
+          const t = a.thick ?? 2;
+          page.drawRectangle({
+            ...corner, width: a.w, height: a.h, borderColor: t ? hex(a.color ?? "#e53935") : undefined, borderWidth: t, borderDashArray: dashArray(a.dash, t),
+            borderLineCap: a.dash === "dot" ? LineCapStyle.Round : undefined, color: a.fill ? hex(a.fill) : undefined, opacity: a.opacity ?? 1, borderOpacity: a.opacity ?? 1,
+          });
           break;
+        }
+        case "ellipse": {
+          const t = a.thick ?? 2;
+          const c = pt(cx, cy);
+          page.drawEllipse({
+            x: c.x, y: c.y, xScale: a.w / 2, yScale: a.h / 2, rotate: degrees(-rot), borderColor: t ? hex(a.color ?? "#e53935") : undefined, borderWidth: t,
+            borderDashArray: dashArray(a.dash, t), borderLineCap: a.dash === "dot" ? LineCapStyle.Round : undefined, color: a.fill ? hex(a.fill) : undefined,
+            opacity: a.opacity ?? 1, borderOpacity: a.opacity ?? 1,
+          });
+          break;
+        }
         case "line": {
-          const [x1, y1, x2, y2] = lineEnds(a);
-          page.drawLine({ start: { x: X(x1), y: Y(y1) }, end: { x: X(x2), y: Y(y2) }, thickness: a.thick ?? 1.5, color: hex(a.color) });
+          let [x1, y1, x2, y2] = lineEnds(a);
+          const t = a.thick ?? 1.5;
+          const c = hex(a.color);
+          const opacity = a.opacity ?? 1;
+          // Arrowheads are filled triangles; the line stops just inside them so its round end doesn't poke out.
+          const heads: number[][][] = [];
+          if (a.arrowEnd) {
+            const h = arrowHead(x1, y1, x2, y2, t);
+            heads.push([h.tip, h.left, h.right]);
+            [x2, y2] = h.stop;
+          }
+          if (a.arrowStart) {
+            const h = arrowHead(x2, y2, x1, y1, t);
+            heads.push([h.tip, h.left, h.right]);
+            [x1, y1] = h.stop;
+          }
+          page.drawLine({ start: { x: X(x1), y: Y(y1) }, end: { x: X(x2), y: Y(y2) }, thickness: t, color: c, lineCap: LineCapStyle.Round, dashArray: dashArray(a.dash, t), opacity }); // round ends, as on screen
+          for (const [p1, p2, p3] of heads) page.drawSvgPath(`M${p1[0]} ${p1[1]} L${p2[0]} ${p2[1]} L${p3[0]} ${p3[1]} Z`, { x: X(0), y: Y(0), color: c, opacity });
           break;
         }
         case "check": {

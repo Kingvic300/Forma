@@ -8,7 +8,7 @@ export { getGroqKey, setGroqKey } from "../../lib/groq";
 export type AiOp =
   | { op: "edit_text"; block: string; text: string }
   | { op: "add_text"; page: number; x: number; y: number; text: string; size?: number; color?: string; bold?: boolean }
-  | { op: "add_shape"; type: "rect" | "line" | "highlight" | "whiteout" | "redact"; page: number; x: number; y: number; w?: number; h?: number; x2?: number; y2?: number; color?: string; thick?: number }
+  | { op: "add_shape"; type: "rect" | "ellipse" | "line" | "highlight" | "whiteout" | "redact"; page: number; x: number; y: number; w?: number; h?: number; x2?: number; y2?: number; color?: string; thick?: number }
   | { op: "update"; id: string; text?: string; x?: number; y?: number; w?: number; h?: number; x2?: number; y2?: number; size?: number; color?: string; bold?: boolean; thick?: number }
   | { op: "delete"; id: string };
 
@@ -24,7 +24,7 @@ Reply with one JSON object: {"reply": "<short message to the user>", "ops": [ ..
 Each op is one of:
  {"op":"edit_text","block":"<block id>","text":"<full new text of that block, \\n between lines>"}
  {"op":"add_text","page":0,"x":72,"y":100,"text":"...","size":14,"color":"#000000","bold":false}
- {"op":"add_shape","type":"rect|line|highlight|whiteout|redact","page":0,"x":0,"y":0,"w":100,"h":20,"color":"#e53935","thick":2}   (for "line" use x2,y2 for the far end instead of w,h)
+ {"op":"add_shape","type":"rect|ellipse|line|highlight|whiteout|redact","page":0,"x":0,"y":0,"w":100,"h":20,"color":"#e53935","thick":2}   (for "line" use x2,y2 for the far end instead of w,h)
  {"op":"update","id":"<annotation id>", ...only the fields to change: text,x,y,w,h,x2,y2,size,color,bold,thick}
  {"op":"delete","id":"<annotation id>"}
 Rules: only edit what the user asked for. Keep the rest of a block's text unchanged when editing part of it. Use block ids exactly as given. If the request is a question or can't be done, return "ops": [] and explain in "reply". Never output anything outside the JSON object.`;

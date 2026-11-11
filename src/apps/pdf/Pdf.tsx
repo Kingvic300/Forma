@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -16,7 +16,7 @@ import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields,
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { isBoldName, matchFont } from "./fonts";
 import { askAi, getGroqKey, setGroqKey, type AiOp } from "./ai";
-import { CELL_PAD, colsOf, CSS_FONT, FONT_LABEL, HEAD_FILL, lineEnds, newTable, rowsOf, tableCol, tableRow, type Ann, type Font, type PdfData, type Span } from "./types";
+import { arrowHead, CELL_PAD, colsOf, CSS_FONT, dashArray, FONT_LABEL, HEAD_FILL, lineEnds, newTable, rowsOf, tableCol, tableRow, type Ann, type Dash, type Font, type PdfData, type Span } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -74,8 +74,13 @@ async function pageLinks(doc: PDFDocumentProxy, index: number): Promise<PageLink
   return out;
 }
 
-type Tool = "select" | "edit" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross" | "table";
-const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "redact", "rect", "line", "table"];
+type Tool = "select" | "edit" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross" | "table" | "arrow" | "ellipse";
+const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "redact", "rect", "ellipse", "line", "arrow", "table"];
+type PenKey = "line" | "arrow" | "rect" | "ellipse";
+type Pen = Pick<Ann, "thick" | "color" | "dash" | "arrowStart" | "arrowEnd" | "opacity" | "fill">;
+const isPenTool = (t: Tool): t is PenKey => t === "line" || t === "arrow" || t === "rect" || t === "ellipse";
+const penKeyOf = (a: Ann): PenKey | null => (a.type === "line" ? (a.arrowEnd || a.arrowStart ? "arrow" : "line") : a.type === "rect" || a.type === "ellipse" ? a.type : null);
+const PEN_FIELDS = ["thick", "color", "dash", "arrowStart", "arrowEnd", "opacity", "fill"] as const;
 const TOOLS: [Tool, typeof Type, string][] = [
   ["select", MousePointer2, "Select"],
   ["edit", TextCursorInput, "Edit text"],
@@ -90,7 +95,9 @@ const TOOLS: [Tool, typeof Type, string][] = [
   ["whiteout", Eraser, "White-out (drag)"],
   ["redact", EyeOff, "Black out (drag)"],
   ["rect", Square, "Box (drag)"],
+  ["ellipse", Circle, "Circle (drag)"],
   ["line", Minus, "Line (drag)"],
+  ["arrow", MoveUpRight, "Arrow (drag)"],
   ["table", Table2, "Table (drag)"],
 ];
 
@@ -115,6 +122,19 @@ export default function Pdf({ id }: { id: string }) {
   const [busy, setBusy] = useState("");
   const [showAi, setShowAi] = useState(false);
   const [dims, setDims] = useState({ rows: 3, cols: 3 });
+  /** Thickness and colour for the next line or box drawn; changing a selected one updates these too. */
+  const [pen, setPen] = useState<Record<PenKey, Pen>>({
+    line: { thick: 1.5, color: "#000000" },
+    arrow: { thick: 1.5, color: "#000000", arrowEnd: true },
+    rect: { thick: 2, color: "#e53935" },
+    ellipse: { thick: 2, color: "#e53935" },
+  });
+  /** Restyle the selected shape and keep its style for the next one drawn with the same tool. */
+  const styleShape = (a: Ann, patch: Partial<Ann>) => {
+    update(a.id, patch);
+    const k = penKeyOf({ ...a, ...patch });
+    if (k) setPen((p) => ({ ...p, [k]: { ...p[k], ...Object.fromEntries(Object.entries(patch).filter(([f]) => (PEN_FIELDS as readonly string[]).includes(f))) } }));
+  };
   const past = useRef<PdfData[]>([]);
   const future = useRef<PdfData[]>([]);
   const lastEdit = useRef({ key: "", at: 0 });
@@ -479,10 +499,10 @@ export default function Pdf({ id }: { id: string }) {
       const apply = (op: AiOp) => {
         if (op.op === "add_text" && pageOk(op.page) && typeof op.text === "string") {
           fresh.push({ id: uid(), page: op.page, type: "text", x: num(op.x, 72), y: num(op.y, 72), w: 0, h: 0, text: op.text, size: num(op.size, 14), font: "helv", bold: !!op.bold, color: color(op.color) ?? "#000000" });
-        } else if (op.op === "add_shape" && pageOk(op.page) && ["rect", "line", "highlight", "whiteout", "redact"].includes(op.type)) {
+        } else if (op.op === "add_shape" && pageOk(op.page) && ["rect", "ellipse", "line", "highlight", "whiteout", "redact"].includes(op.type)) {
           const x = num(op.x, 72);
           const y = num(op.y, 72);
-          const base = { id: uid(), page: op.page, type: op.type, x, y, w: Math.max(1, num(op.w, 100)), h: Math.max(1, num(op.h, 20)), color: color(op.color) ?? (op.type === "highlight" ? "#ffeb3b" : op.type === "whiteout" ? "#ffffff" : op.type === "rect" ? "#e53935" : "#000000"), thick: typeof op.thick === "number" ? op.thick : undefined } as Ann;
+          const base = { id: uid(), page: op.page, type: op.type, x, y, w: Math.max(1, num(op.w, 100)), h: Math.max(1, num(op.h, 20)), color: color(op.color) ?? (op.type === "highlight" ? "#ffeb3b" : op.type === "whiteout" ? "#ffffff" : op.type === "rect" || op.type === "ellipse" ? "#e53935" : "#000000"), thick: typeof op.thick === "number" ? op.thick : undefined } as Ann;
           if (op.type === "line") Object.assign(base, { w: 0, h: 0, x2: num(op.x2, x + 100), y2: num(op.y2, y) });
           fresh.push(base);
         } else if (op.op === "update") {
@@ -542,7 +562,7 @@ export default function Pdf({ id }: { id: string }) {
       {sel && (
         <div className="props">
           <span className="muted">{sel.type === "text" ? "Text" : sel.type === "image" ? "Image" : sel.type}</span>
-          {sel.type !== "image" && sel.type !== "redact" && <label className="color" title="Color">Color <input type="color" value={sel.color ?? "#000000"} onChange={(e) => update(sel.id, { color: e.target.value })} /></label>}
+          {sel.type !== "image" && sel.type !== "redact" && <label className="color" title="Color">Color <input type="color" value={sel.color ?? "#000000"} onChange={(e) => (penKeyOf(sel) ? styleShape(sel, { color: e.target.value }) : update(sel.id, { color: e.target.value }))} /></label>}
           {sel.type === "text" && (
             <>
               <select value={sel.font ?? "helv"} onChange={(e) => restyle(sel, { font: e.target.value as Font })}>
@@ -552,6 +572,7 @@ export default function Pdf({ id }: { id: string }) {
                 {[...new Set([8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 64, sel.size ?? 14])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
               </select>
               <button className={sel.bold ? "on" : ""} onClick={() => restyle(sel, { bold: !sel.bold })}><b>B</b></button>
+              <Thickness value={sel.stroke ?? 0} min={0} max={3} step={0.05} zero="normal" onChange={(t) => update(sel.id, { stroke: t || undefined })} />
             </>
           )}
           {sel.type === "table" && (() => {
@@ -576,11 +597,8 @@ export default function Pdf({ id }: { id: string }) {
               </>
             );
           })()}
-          {(sel.type === "line" || sel.type === "rect" || sel.type === "table") && (
-            <select value={sel.thick ?? (sel.type === "line" ? 1.5 : sel.type === "table" ? 1 : 2)} title="Thickness" onChange={(e) => update(sel.id, { thick: Number(e.target.value) })}>
-              {[...new Set([...(sel.type === "table" ? [0] : []), 0.5, 1, 1.5, 2, 3, 4, 6, 8, sel.thick ?? (sel.type === "line" ? 1.5 : sel.type === "table" ? 1 : 2)])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n ? `${n} pt` : "No lines"}</option>)}
-            </select>
-          )}
+          {sel.type === "table" && <Thickness value={sel.thick ?? 1} min={0} zero="no lines" onChange={(t) => update(sel.id, { thick: t })} />}
+          {penKeyOf(sel) && <ShapeStyle line={sel.type === "line"} value={{ ...sel, thick: sel.thick ?? (sel.type === "line" ? 1.5 : 2) }} onChange={(p) => styleShape(sel, p)} />}
           <button onClick={() => add({ ...sel, x: sel.x + 12, y: sel.y + 12, x2: sel.x2 === undefined ? undefined : sel.x2 + 12, y2: sel.y2 === undefined ? undefined : sel.y2 + 12 })}>Duplicate</button>
           <button onClick={() => remove(sel.id)}>Delete</button>
         </div>
@@ -592,6 +610,12 @@ export default function Pdf({ id }: { id: string }) {
               <label>Rows <input type="number" min={1} max={50} value={dims.rows} onChange={(e) => setDims({ ...dims, rows: Math.min(50, Math.max(1, Number(e.target.value) || 1)) })} /></label>{" "}
               <label>Columns <input type="number" min={1} max={20} value={dims.cols} onChange={(e) => setDims({ ...dims, cols: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })} /></label>{" "}
               Drag on the page to draw the table, or click for a standard size.
+            </>
+          ) : isPenTool(tool) ? (
+            <>
+              <label className="color" title="Color">Color <input type="color" value={pen[tool].color} onChange={(e) => setPen({ ...pen, [tool]: { ...pen[tool], color: e.target.value } })} /></label>
+              <ShapeStyle line={tool === "line" || tool === "arrow"} value={pen[tool]} onChange={(p) => setPen({ ...pen, [tool]: { ...pen[tool], ...p } })} />{" "}
+              {tool === "line" || tool === "arrow" ? "Drag to draw. Shift keeps it straight." : `Drag to draw. Shift makes a ${tool === "rect" ? "square" : "circle"}.`}
             </>
           ) : tool === "edit"
             ? "Click a line of text to change it. Tip: with Select, double-click text to do the same."
@@ -627,12 +651,14 @@ export default function Pdf({ id }: { id: string }) {
                   size={size}
                   scale={scale}
                   tool={tool}
+                  pen={isPenTool(tool) ? pen[tool] : undefined}
                   anns={data.anns.filter((a) => a.page === i)}
                   selected={selected}
                   onSelect={setSelected}
                   onPlace={(x, y) => place(i, x, y)}
                   onDraw={(r) => {
-                    if (tool !== "table") return void add({ page: i, type: tool as Ann["type"], ...r, color: tool === "highlight" ? "#ffeb3b" : tool === "whiteout" ? "#ffffff" : tool === "rect" ? "#e53935" : "#000000" });
+                    if (isPenTool(tool)) return void add({ page: i, type: tool === "arrow" ? "line" : tool, ...r, ...pen[tool] });
+                    if (tool !== "table") return void add({ page: i, type: tool as Ann["type"], ...r, color: tool === "highlight" ? "#ffeb3b" : tool === "whiteout" ? "#ffffff" : "#000000" });
                     if (!r.w) r = { ...r, w: Math.max(60, Math.min(360, size.w - r.x - 24)), h: dims.rows * 20 };
                     const t = add({ page: i, type: "table", ...r, ...newTable(dims.rows, dims.cols), head: true, size: 10, thick: 1, color: "#000000" });
                     setTool("select");
@@ -769,6 +795,7 @@ function PageView(props: {
   size: Size;
   scale: number;
   tool: Tool;
+  pen?: Pen;
   anns: Ann[];
   selected: string | null;
   onSelect: (id: string | null) => void;
@@ -852,7 +879,24 @@ function PageView(props: {
           props.onPlace(p.x, p.y);
         }
       }}
-      onPointerMove={(e) => draft && setDraft({ ...draft, ...toPage(e) })}
+      onPointerMove={(e) => {
+        if (!draft) return;
+        let p = toPage(e);
+        if ((tool === "rect" || tool === "ellipse") && e.shiftKey) {
+          // Shift makes a square or circle.
+          const d = Math.max(Math.abs(p.x - draft.x0), Math.abs(p.y - draft.y0));
+          p = { x: draft.x0 + Math.sign(p.x - draft.x0 || 1) * d, y: draft.y0 + Math.sign(p.y - draft.y0 || 1) * d };
+        }
+        if ((tool === "line" || tool === "arrow") && e.shiftKey) {
+          // Shift keeps the line straight: snap to steps of 45°.
+          const dx = p.x - draft.x0;
+          const dy = p.y - draft.y0;
+          const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+          const d = Math.hypot(dx, dy);
+          p = { x: draft.x0 + d * Math.cos(a), y: draft.y0 + d * Math.sin(a) };
+        }
+        setDraft({ ...draft, ...p });
+      }}
       onDoubleClick={(e) => {
         // Double-clicking printed text with Select is a shortcut for Edit text.
         if (tool !== "select" || (e.target !== e.currentTarget && e.target !== canvas.current)) return;
@@ -864,7 +908,7 @@ function PageView(props: {
         if (!draft) return;
         let r = { x: Math.min(draft.x0, draft.x), y: Math.min(draft.y0, draft.y), w: Math.abs(draft.x - draft.x0), h: Math.abs(draft.y - draft.y0) };
         setDraft(null);
-        if (tool === "line") {
+        if (tool === "line" || tool === "arrow") {
           const far = Math.hypot(draft.x - draft.x0, draft.y - draft.y0) >= 4;
           return props.onDraw({ x: draft.x0, y: draft.y0, w: 0, h: 0, x2: far ? draft.x : draft.x0 + 100, y2: far ? draft.y : draft.y0 });
         }
@@ -874,15 +918,22 @@ function PageView(props: {
       }}
     >
       <canvas ref={canvas} style={{ width: size.w * scale, height: size.h * scale }} />
-      {draft && tool === "line" && (
+      {draft && (tool === "line" || tool === "arrow") && (
         <svg className="draft-line" width={size.w * scale} height={size.h * scale}>
-          <line x1={draft.x0 * scale} y1={draft.y0 * scale} x2={draft.x * scale} y2={draft.y * scale} stroke="#111" strokeWidth={1.5 * scale} strokeLinecap="round" />
+          <LineMarks x1={draft.x0 * scale} y1={draft.y0 * scale} x2={draft.x * scale} y2={draft.y * scale} style={props.pen ?? {}} scale={scale} />
         </svg>
       )}
-      {draft && tool !== "line" && (
+      {draft && (tool === "rect" || tool === "ellipse") && (
+        <div className="draft-shape" style={{ left: Math.min(draft.x0, draft.x) * scale, top: Math.min(draft.y0, draft.y) * scale }}>
+          <ShapeMarks kind={tool} w={Math.abs(draft.x - draft.x0) * scale} h={Math.abs(draft.y - draft.y0) * scale} style={props.pen ?? {}} scale={scale} />
+        </div>
+      )}
+      {draft && !isPenTool(tool) && (
         <div
           className={"draft " + tool}
-          style={{ left: Math.min(draft.x0, draft.x) * scale, top: Math.min(draft.y0, draft.y) * scale, width: Math.abs(draft.x - draft.x0) * scale, height: Math.abs(draft.y - draft.y0) * scale }}
+          style={{
+            left: Math.min(draft.x0, draft.x) * scale, top: Math.min(draft.y0, draft.y) * scale, width: Math.abs(draft.x - draft.x0) * scale, height: Math.abs(draft.y - draft.y0) * scale,
+          }}
         />
       )}
       {tool === "select" &&
@@ -1058,7 +1109,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
           contentEditable
           suppressContentEditableWarning
           spellCheck={false}
-          style={{ fontSize: (a.size ?? 14) * scale, lineHeight: a.lead ? `${a.lead * scale}px` : undefined, fontFamily: CSS_FONT[a.font ?? "helv"], color: a.color, fontWeight: a.bold ? 700 : 400 }}
+          style={{ fontSize: (a.size ?? 14) * scale, lineHeight: a.lead ? `${a.lead * scale}px` : undefined, fontFamily: CSS_FONT[a.font ?? "helv"], color: a.color, fontWeight: a.bold ? 700 : 400, WebkitTextStroke: a.stroke ? `${a.stroke * scale}px ${a.color ?? "#000000"}` : undefined }}
           onInput={(e) => {
             if (!a.spans) return onChange({ text: e.currentTarget.innerText.replace(/\n$/, "") });
             const spans = readSpans(e.currentTarget);
@@ -1150,6 +1201,10 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
         </svg>
       );
       break;
+    case "rect":
+    case "ellipse":
+      body = <ShapeMarks kind={a.type} w={v.w * scale} h={v.h * scale} style={v} scale={scale} />;
+      break;
     case "line":
       {
         const ox = Math.min(lx1, lx2) * scale - LINE_PAD;
@@ -1158,7 +1213,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
         body = (
           <svg className="ann-line-svg" width="100%" height="100%">
             <line x1={p[0]} y1={p[1]} x2={p[2]} y2={p[3]} stroke="transparent" strokeWidth={Math.max(14, (v.thick ?? 1.5) * scale)} strokeLinecap="round" />
-            <line x1={p[0]} y1={p[1]} x2={p[2]} y2={p[3]} stroke={v.color ?? "#000000"} strokeWidth={(v.thick ?? 1.5) * scale} strokeLinecap="round" />
+            <LineMarks x1={p[0]} y1={p[1]} x2={p[2]} y2={p[3]} style={v} scale={scale} />
           </svg>
         );
       }
@@ -1170,7 +1225,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
   return (
     <div
       className={`ann ann-${a.type}` + (selected ? " sel" : "")}
-      style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : a.type === "rect" ? { borderColor: a.color, borderWidth: (a.thick ?? 2) * scale } : {}) }}
+      style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : {}) }}
       onPointerDown={(e) => { if ((a.type === "text" || a.type === "table") && e.target !== e.currentTarget) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
     >
       {body}
@@ -1238,5 +1293,88 @@ function Cell({ value, autoFocus, style, onFocus, onText, onTab }: { value: stri
         onTab(e.currentTarget, e.shiftKey);
       }}
     />
+  );
+}
+
+/** Stroke width in points: a slider for quick changes and a box for an exact value. */
+function Thickness({ value, min, max = 12, step = 0.25, zero, onChange }: { value: number; min: number; max?: number; step?: number; zero?: string; onChange: (t: number) => void }) {
+  const set = (v: number) => Number.isFinite(v) && onChange(Math.round(Math.min(max === 12 ? 20 : max, Math.max(min, v)) * 100) / 100);
+  return (
+    <label className="thickness" title="Thickness">
+      Thickness
+      <input type="range" min={min} max={max} step={step} value={Math.min(max, value)} onChange={(e) => set(Number(e.target.value))} />
+      <input key={value} type="number" min={min} max={max === 12 ? 20 : max} step={step} defaultValue={value} onBlur={(e) => set(Number(e.target.value))} onKeyDown={(e) => e.key === "Enter" && set(Number((e.target as HTMLInputElement).value))} />
+      <span>{value || !zero ? "pt" : `pt (${zero})`}</span>
+    </label>
+  );
+}
+
+/** A line with its dash style and arrowheads, in screen pixels. */
+function LineMarks({ x1, y1, x2, y2, style, scale }: { x1: number; y1: number; x2: number; y2: number; style: Pen; scale: number }) {
+  const t = (style.thick ?? 1.5) * scale;
+  const color = style.color ?? "#000000";
+  const heads: ReturnType<typeof arrowHead>[] = [];
+  if (style.arrowEnd) {
+    const h = arrowHead(x1, y1, x2, y2, t);
+    heads.push(h);
+    [x2, y2] = h.stop;
+  }
+  if (style.arrowStart) {
+    const h = arrowHead(x2, y2, x1, y1, t);
+    heads.push(h);
+    [x1, y1] = h.stop;
+  }
+  return (
+    <g opacity={style.opacity ?? 1}>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={t} strokeLinecap="round" strokeDasharray={dashArray(style.dash, t)?.join(" ")} />
+      {heads.map((h, i) => <polygon key={i} points={[h.tip, h.left, h.right].map((q) => q.join(",")).join(" ")} fill={color} />)}
+    </g>
+  );
+}
+
+/** A box or circle with its border, dash style, fill and opacity; the border straddles the edge as in the PDF. */
+function ShapeMarks({ kind, w, h, style, scale }: { kind: "rect" | "ellipse"; w: number; h: number; style: Pen; scale: number }) {
+  const t = (style.thick ?? 2) * scale;
+  const common = {
+    fill: style.fill ?? "none", fillOpacity: style.opacity ?? 1, stroke: t ? style.color ?? "#e53935" : "none", strokeOpacity: style.opacity ?? 1, strokeWidth: t,
+    strokeDasharray: dashArray(style.dash, t)?.join(" "), strokeLinecap: style.dash === "dot" ? ("round" as const) : undefined,
+  };
+  return (
+    <svg className="ann-shape-svg" width={w} height={h}>
+      {kind === "rect" ? <rect x={0} y={0} width={w} height={h} {...common} /> : <ellipse cx={w / 2} cy={h / 2} rx={w / 2} ry={h / 2} {...common} />}
+    </svg>
+  );
+}
+
+/** Line style controls shared by the selected shape and the drawing tools. */
+function ShapeStyle({ line, value, onChange }: { line: boolean; value: Pen; onChange: (p: Partial<Ann>) => void }) {
+  const arrows = value.arrowStart && value.arrowEnd ? "both" : value.arrowStart ? "start" : value.arrowEnd ? "end" : "none";
+  return (
+    <>
+      <Thickness value={value.thick ?? (line ? 1.5 : 2)} min={line ? 0.25 : 0} zero="no border" onChange={(t) => onChange({ thick: t })} />
+      <select title="Line style" value={value.dash ?? "solid"} onChange={(e) => onChange({ dash: e.target.value === "solid" ? undefined : (e.target.value as Dash) })}>
+        <option value="solid">━ Solid</option>
+        <option value="dash">╍ Dashed</option>
+        <option value="dot">┈ Dotted</option>
+      </select>
+      {line ? (
+        <select title="Arrowheads" value={arrows} onChange={(e) => onChange({ arrowStart: e.target.value === "start" || e.target.value === "both" || undefined, arrowEnd: e.target.value === "end" || e.target.value === "both" || undefined })}>
+          <option value="none">No arrows</option>
+          <option value="end">Arrow at end →</option>
+          <option value="start">Arrow at start ←</option>
+          <option value="both">Both ends ↔</option>
+        </select>
+      ) : (
+        <label className="color" title="Fill">
+          <input type="checkbox" checked={!!value.fill} onChange={(e) => onChange({ fill: e.target.checked ? "#fff59d" : undefined })} /> Fill
+          {value.fill && <input type="color" value={value.fill} onChange={(e) => onChange({ fill: e.target.value })} />}
+        </label>
+      )}
+      <label className="thickness" title="Opacity">
+        Opacity
+        <input type="range" min={0.1} max={1} step={0.05} value={value.opacity ?? 1} onChange={(e) => onChange({ opacity: Number(e.target.value) === 1 ? undefined : Number(e.target.value) })} />
+        <span>{Math.round((value.opacity ?? 1) * 100)}%</span>
+      </label>
+    </>
   );
 }
