@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -16,7 +16,7 @@ import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields,
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { isBoldName, matchFont } from "./fonts";
 import { askAi, getGroqKey, setGroqKey, type AiOp } from "./ai";
-import { arrowHead, CELL_PAD, colsOf, CSS_FONT, dashArray, FONT_LABEL, HEAD_FILL, lineEnds, newTable, rowsOf, tableCol, tableRow, type Ann, type Dash, type Font, type PdfData, type Span } from "./types";
+import { arrowHead, CELL_PAD, colsOf, CSS_FONT, dashArray, FONT_LABEL, HEAD_FILL, lineEnds, newTable, rowsOf, tableCol, tableRow, fmtAt, formatCells, type Ann, type CellFmt, type Dash, type Font, type PdfData, type Span } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -101,8 +101,6 @@ const TOOLS: [Tool, typeof Type, string][] = [
   ["table", Table2, "Table (drag)"],
 ];
 
-/** The table cell typed in last, so row and column buttons know where to insert. */
-const lastCell = { id: "", r: -1, c: -1 };
 
 type Size = { w: number; h: number };
 
@@ -122,6 +120,9 @@ export default function Pdf({ id }: { id: string }) {
   const [busy, setBusy] = useState("");
   const [showAi, setShowAi] = useState(false);
   const [dims, setDims] = useState({ rows: 3, cols: 3 });
+  /** The table cell clicked last: row and column buttons and cell formatting act on it. */
+  const [cell, setCell] = useState<{ id: string; r: number; c: number } | null>(null);
+  const [cellScope, setCellScope] = useState<"cell" | "row" | "col" | "all">("cell");
   /** Thickness and colour for the next line or box drawn; changing a selected one updates these too. */
   const [pen, setPen] = useState<Record<PenKey, Pen>>({
     line: { thick: 1.5, color: "#000000" },
@@ -562,7 +563,7 @@ export default function Pdf({ id }: { id: string }) {
       {sel && (
         <div className="props">
           <span className="muted">{sel.type === "text" ? "Text" : sel.type === "image" ? "Image" : sel.type}</span>
-          {sel.type !== "image" && sel.type !== "redact" && <label className="color" title="Color">Color <input type="color" value={sel.color ?? "#000000"} onChange={(e) => (penKeyOf(sel) ? styleShape(sel, { color: e.target.value }) : update(sel.id, { color: e.target.value }))} /></label>}
+          {sel.type !== "image" && sel.type !== "redact" && <label className="color" title={sel.type === "table" ? "Line and default text color" : "Color"}>{sel.type === "table" ? "Lines" : "Color"} <input type="color" value={sel.color ?? "#000000"} onChange={(e) => (penKeyOf(sel) ? styleShape(sel, { color: e.target.value }) : update(sel.id, { color: e.target.value }))} /></label>}
           {sel.type === "text" && (
             <>
               <select value={sel.font ?? "helv"} onChange={(e) => restyle(sel, { font: e.target.value as Font })}>
@@ -576,24 +577,50 @@ export default function Pdf({ id }: { id: string }) {
             </>
           )}
           {sel.type === "table" && (() => {
-            const at = lastCell.id === sel.id ? lastCell : { r: (sel.cells?.length ?? 1) - 1, c: (sel.cells?.[0]?.length ?? 1) - 1 };
             const rows = sel.cells?.length ?? 1;
             const cols = sel.cells?.[0]?.length ?? 1;
-            const change = (p: Partial<Ann>) => {
-              if (!Object.keys(p).length) return;
-              lastCell.id = "";
-              update(sel.id, p);
+            const at = cell?.id === sel.id && cell.r < rows && cell.c < cols ? cell : { r: rows - 1, c: cols - 1 };
+            const change = (p: Partial<Ann>) => Object.keys(p).length && update(sel.id, p);
+            const targets = (): [number, number][] => {
+              const out: [number, number][] = [];
+              for (let r = 0; r < rows; r++)
+                for (let c = 0; c < cols; c++)
+                  if (cellScope === "all" || (cellScope === "row" && r === at.r) || (cellScope === "col" && c === at.c) || (cellScope === "cell" && r === at.r && c === at.c)) out.push([r, c]);
+              return out;
             };
+            const fm = fmtAt(sel, at.r, at.c);
+            const fmt = (p: CellFmt) => update(sel.id, { cellFmt: formatCells(sel, targets(), p) });
+            const headRow = !!sel.head && at.r === 0;
             return (
               <>
-                <select value={sel.size ?? 10} title="Text size" onChange={(e) => update(sel.id, { size: Number(e.target.value) })}>
-                  {[...new Set([7, 8, 9, 10, 11, 12, 14, 16, 18, 24, sel.size ?? 10])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
-                </select>
                 <button className={sel.head ? "on" : ""} title="Bold, shaded first row" onClick={() => update(sel.id, { head: !sel.head })}>Header row</button>
                 <button title={`Add a row below row ${at.r + 1}`} onClick={() => change(tableRow(sel, at.r, "add"))}>+ Row</button>
                 <button title={`Remove row ${at.r + 1}`} disabled={rows < 2} onClick={() => change(tableRow(sel, at.r, "remove"))}>− Row</button>
                 <button title={`Add a column right of column ${at.c + 1}`} onClick={() => change(tableCol(sel, at.c, "add"))}>+ Column</button>
                 <button title={`Remove column ${at.c + 1}`} disabled={cols < 2} onClick={() => change(tableCol(sel, at.c, "remove"))}>− Column</button>
+                <span className="psep" />
+                <select title="Which cells the formatting below applies to" value={cellScope} onChange={(e) => setCellScope(e.target.value as typeof cellScope)}>
+                  <option value="cell">Cell {String.fromCharCode(65 + (at.c % 26))}{at.r + 1}</option>
+                  <option value="row">Row {at.r + 1}</option>
+                  <option value="col">Column {String.fromCharCode(65 + (at.c % 26))}</option>
+                  <option value="all">All cells</option>
+                </select>
+                <select title="Text size" value={fm.size ?? sel.size ?? 10} onChange={(e) => fmt({ size: Number(e.target.value) })}>
+                  {[...new Set([6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, fm.size ?? sel.size ?? 10])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
+                </select>
+                <label className="color" title="Text color">A <input type="color" value={fm.color ?? sel.color ?? "#000000"} onChange={(e) => fmt({ color: e.target.value })} /></label>
+                <button className={(fm.bold ?? headRow) ? "on" : ""} title="Bold" onClick={() => fmt({ bold: !(fm.bold ?? headRow) })}><b>B</b></button>
+                <label className="color" title="Cell background">Fill <input type="color" value={fm.bg ?? "#ffffff"} onChange={(e) => fmt({ bg: e.target.value })} /></label>
+                {fm.bg && <button title="Remove fill" onClick={() => fmt({ bg: undefined })}>No fill</button>}
+                <span className="seg">
+                  {(["left", "center", "right"] as const).map((al) => (
+                    <button key={al} className={(fm.align ?? "left") === al ? "on" : ""} title={`Align ${al}`} onClick={() => fmt({ align: al === "left" ? undefined : al })}>
+                      {al === "left" ? <AlignLeft size={14} /> : al === "center" ? <AlignCenter size={14} /> : <AlignRight size={14} />}
+                    </button>
+                  ))}
+                </span>
+                <button title="Clear formatting of these cells" onClick={() => fmt({ size: undefined, color: undefined, bold: undefined, bg: undefined, align: undefined })}>Clear</button>
+                <span className="psep" />
               </>
             );
           })()}
@@ -667,6 +694,7 @@ export default function Pdf({ id }: { id: string }) {
                   onChange={update}
                   onRemove={remove}
                   onEditRun={(run, all) => editRun(i, run, all)}
+                  onCell={(aid, r, c) => setCell({ id: aid, r, c })}
                   focusText={focusText}
                 />
               </div>
@@ -804,6 +832,7 @@ function PageView(props: {
   onChange: (id: string, patch: Partial<Ann>) => void;
   onRemove: (id: string) => void;
   onEditRun: (run: TextRun, all: TextRun[]) => void;
+  onCell: (id: string, r: number, c: number) => void;
   focusText: string | null;
 }) {
   const { doc, index, size, scale, tool } = props;
@@ -825,7 +854,8 @@ function PageView(props: {
   }, [doc, index, visible]);
 
   useEffect(() => {
-    const io = new IntersectionObserver(([e]) => e.isIntersecting && setVisible(true), { rootMargin: "800px" });
+    // Pages far out of view give their pixels back, so long PDFs stay light at high resolution.
+    const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: "1600px" });
     io.observe(wrap.current!);
     return () => io.disconnect();
   }, []);
@@ -836,21 +866,43 @@ function PageView(props: {
     let cancelled = false;
     doc.getPage(index + 1).then((page) => {
       if (cancelled || !canvas.current) return;
+      // Draw at least twice the screen's resolution and let the browser scale it down: on ordinary
+      // (1x) screens this gives smooth, sharp letters instead of soft ones. Very large pages are capped.
       const dpr = window.devicePixelRatio || 1;
-      const vp = page.getViewport({ scale: scale * dpr });
-      const c = canvas.current;
-      c.width = Math.floor(vp.width);
-      c.height = Math.floor(vp.height);
+      let k = Math.max(2, dpr);
+      const base = page.getViewport({ scale });
+      const MAX = 20e6;
+      if (base.width * base.height * k * k > MAX) k = Math.max(dpr, Math.sqrt(MAX / (base.width * base.height)));
+      const vp = page.getViewport({ scale: scale * k });
+      // Render off screen and swap in when done, so zooming never flashes a blank page.
+      const off = document.createElement("canvas");
+      off.width = Math.round(vp.width);
+      off.height = Math.round(vp.height);
       // A CPU-backed canvas: WebKitGTK's accelerated 2D canvas drops or shifts parts of
       // pdf.js output (missing text bands, blocks drawn in the wrong place).
-      task = page.render({ canvasContext: c.getContext("2d", { willReadFrequently: true })!, viewport: vp });
-      task.promise.catch(() => {});
+      const ctx = off.getContext("2d", { willReadFrequently: true })!;
+      ctx.imageSmoothingQuality = "high";
+      task = page.render({ canvasContext: ctx, viewport: vp });
+      task.promise
+        .then(() => {
+          const c = canvas.current;
+          if (cancelled || !c) return;
+          c.width = off.width;
+          c.height = off.height;
+          c.getContext("2d", { willReadFrequently: true })!.drawImage(off, 0, 0);
+          off.width = off.height = 0;
+        })
+        .catch(() => {});
     });
     return () => {
       cancelled = true;
       task?.cancel();
     };
   }, [doc, index, scale, visible]);
+
+  useEffect(() => {
+    if (!visible && canvas.current) canvas.current.width = canvas.current.height = 0;
+  }, [visible]);
 
   const toPage = (e: React.PointerEvent) => {
     const r = wrap.current!.getBoundingClientRect();
@@ -917,7 +969,7 @@ function PageView(props: {
         props.onDraw(r);
       }}
     >
-      <canvas ref={canvas} style={{ width: size.w * scale, height: size.h * scale }} />
+      <canvas ref={canvas} />
       {draft && (tool === "line" || tool === "arrow") && (
         <svg className="draft-line" width={size.w * scale} height={size.h * scale}>
           <LineMarks x1={draft.x0 * scale} y1={draft.y0 * scale} x2={draft.x * scale} y2={draft.y * scale} style={props.pen ?? {}} scale={scale} />
@@ -951,7 +1003,7 @@ function PageView(props: {
           />
         ))}
       {props.anns.map((a) => (
-        <AnnView key={a.id} a={a} scale={scale} focus={props.focusText === a.id} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} />
+        <AnnView key={a.id} a={a} scale={scale} focus={props.focusText === a.id} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} onCell={(r, c) => props.onCell(a.id, r, c)} />
       ))}
     </div>
   );
@@ -995,8 +1047,29 @@ const CURSOR: Record<Handle, string> = { n: "ns-resize", s: "ns-resize", e: "ew-
 
 const TEXT_EDGE = 6; // px of draggable border around a text box
 
-function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void }) {
+function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove, onCell }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void; onCell: (r: number, c: number) => void }) {
   const [live, setLive] = useState<Partial<Ann> | null>(null); // position/size while dragging
+  const tableRef = useRef<HTMLDivElement>(null);
+  // Rows grow to fit their text after any change (typing, bigger text, narrower columns), as in a word processor.
+  useLayoutEffect(() => {
+    const el = tableRef.current;
+    if (a.type !== "table" || !el || live) return;
+    const cols = a.cells?.[0]?.length ?? 1;
+    const abs = rowsOf(a).map((f) => f * a.h);
+    let grew = false;
+    el.querySelectorAll<HTMLElement>(".ann-cell").forEach((cellEl, i) => {
+      const r = Math.floor(i / cols);
+      const need = cellEl.scrollHeight / scale;
+      if (need > abs[r] + 0.5) {
+        abs[r] = need;
+        grew = true;
+      }
+    });
+    if (!grew) return;
+    const h = abs.reduce((s, x) => s + x, 0);
+    onChange({ rowH: abs.map((x) => x / h), h });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.cells, a.cellFmt, a.size, a.colW, a.w, a.font, a.head]);
   const text = useRef<HTMLDivElement>(null);
   const v = { ...a, ...live };
 
@@ -1152,7 +1225,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
         } else if (i >= 0) focusCell(all[i]);
       };
       body = (
-        <div className="ann-table">
+        <div className="ann-table" ref={tableRef}>
           {a.head && <div className="head" style={{ height: `${rh[0] * 100}%`, background: HEAD_FILL }} />}
           {rows.map((row, r) =>
             row.map((t, c) => (
@@ -1160,12 +1233,17 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
                 key={`${r}-${c}`}
                 value={t}
                 autoFocus={focus && r === 0 && c === 0}
-                style={{
-                  left: `${at(cw, c)}%`, top: `${at(rh, r)}%`, width: `${cw[c] * 100}%`, height: `${rh[r] * 100}%`, padding: CELL_PAD * scale,
-                  fontSize: size, lineHeight: `${size * 1.2}px`, fontFamily: CSS_FONT[a.font ?? "helv"], fontWeight: a.head && r === 0 ? 700 : 400, color: a.color,
-                }}
+                style={(() => {
+                  const fm = fmtAt(a, r, c);
+                  const sz = fm.size ? fm.size * scale : size;
+                  return {
+                    left: `${at(cw, c)}%`, top: `${at(rh, r)}%`, width: `${cw[c] * 100}%`, height: `${rh[r] * 100}%`, padding: CELL_PAD * scale,
+                    fontSize: sz, lineHeight: `${sz * 1.2}px`, fontFamily: CSS_FONT[a.font ?? "helv"], fontWeight: (fm.bold ?? (a.head && r === 0)) ? 700 : 400,
+                    color: fm.color ?? a.color, background: fm.bg, textAlign: fm.align,
+                  };
+                })()}
                 onFocus={() => {
-                  Object.assign(lastCell, { id: a.id, r, c });
+                  onCell(r, c);
                   onSelect();
                 }}
                 onText={(text, el) => typed(r, c, text, el)}

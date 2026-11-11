@@ -1,7 +1,7 @@
 import fontkit from "@pdf-lib/fontkit";
 import { degrees, LineCapStyle, popGraphicsState, PDFArray, pushGraphicsState, setLineWidth, setStrokingRgbColor, setTextRenderingMode, TextRenderingMode, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
 import { fontBytes } from "./fonts";
-import { arrowHead, CELL_PAD, cellBaseline, colsOf, dashArray, HEAD_FILL, lineEnds, rowsOf, type Ann, type Font, type PdfData, type Span } from "./types";
+import { arrowHead, CELL_PAD, cellBaseline, colsOf, dashArray, fmtAt, HEAD_FILL, lineEnds, rowsOf, type Ann, type Font, type PdfData, type Span } from "./types";
 
 const hex = (h = "#000000") => {
   const n = parseInt(h.slice(1), 16);
@@ -154,16 +154,24 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
       for (let r = 0; r < cells.length; r++) {
         const head = !!a.head && r === 0;
         if (head) page.drawRectangle({ x: X(a.x), y: Y(y + rh[r]), width: a.w, height: rh[r], color: hex(HEAD_FILL) });
-        const f = await font(a.font, head);
-        const width = (t: string) => f.widthOfTextAtSize(t, size);
         let x = a.x;
         for (let k = 0; k < cw.length; k++) {
-          const lines = wrap(cells[r][k] ?? "", cw[k] - CELL_PAD * 2, width);
+          const fm = fmtAt(a, r, k);
+          if (fm.bg) page.drawRectangle({ x: X(x), y: Y(y + rh[r]), width: cw[k], height: rh[r], color: hex(fm.bg) });
+          const sz = fm.size ?? size;
+          const f = await font(a.font, fm.bold ?? head);
+          const width = (t: string) => f.widthOfTextAtSize(t, sz);
+          const room = cw[k] - CELL_PAD * 2;
+          const lines = wrap(cells[r][k] ?? "", room, width);
           for (let i = 0; i < lines.length; i++) {
-            const base = y + cellBaseline(size) + i * size * 1.2;
+            const base = y + cellBaseline(sz) + i * sz * 1.2;
             if (base > y + rh[r]) break; // clipped, as on screen
             const t = lines[i].trimStart();
-            if (t) page.drawText(t, { x: X(x + CELL_PAD) + width(lines[i].slice(0, lines[i].length - t.length)), y: Y(base), size, font: f, color: c });
+            if (!t) continue;
+            const lead = width(lines[i].slice(0, lines[i].length - t.length));
+            const free = room - lead - width(t);
+            const dx = fm.align === "center" ? free / 2 : fm.align === "right" ? free : 0;
+            page.drawText(t, { x: X(x + CELL_PAD) + lead + dx, y: Y(base), size: sz, font: f, color: fm.color ? hex(fm.color) : c });
           }
           x += cw[k];
         }

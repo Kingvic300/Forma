@@ -70,6 +70,8 @@ export interface Ann {
   rowH?: number[];
   /** Draw the first row as a bold, shaded header. */
   head?: boolean;
+  /** Per-cell formatting, row by row (missing entries use the table's own size and colour). */
+  cellFmt?: (CellFmt | null)[][];
 }
 
 /** The two ends of a line annotation, in page points. */
@@ -86,6 +88,34 @@ const even = (n: number) => Array.from({ length: n }, () => 1 / n);
 export const colsOf = (a: Ann) => (a.colW?.length === a.cells?.[0]?.length ? a.colW! : even(a.cells?.[0]?.length ?? 1));
 export const rowsOf = (a: Ann) => (a.rowH?.length === a.cells?.length ? a.rowH! : even(a.cells?.length ?? 1));
 
+export interface CellFmt {
+  size?: number;
+  color?: string;
+  bold?: boolean;
+  bg?: string;
+  align?: "left" | "center" | "right";
+}
+
+export const fmtAt = (a: Ann, r: number, c: number): CellFmt => a.cellFmt?.[r]?.[c] ?? {};
+
+/** The formatting grid at the table's full size, so rows and columns can be inserted in step with the cells. */
+function fmtGrid(a: Ann) {
+  const cells = a.cells ?? [[""]];
+  return cells.map((row, r) => row.map((_, c) => a.cellFmt?.[r]?.[c] ?? null));
+}
+
+/** Apply formatting to some cells; undefined values clear that setting. */
+export function formatCells(a: Ann, at: [number, number][], patch: CellFmt): (CellFmt | null)[][] {
+  const grid = fmtGrid(a);
+  for (const [r, c] of at) {
+    if (!grid[r] || c >= grid[r].length) continue;
+    const next: CellFmt = { ...(grid[r][c] ?? {}), ...patch };
+    for (const k of Object.keys(next) as (keyof CellFmt)[]) if (next[k] === undefined) delete next[k];
+    grid[r][c] = Object.keys(next).length ? next : null;
+  }
+  return grid;
+}
+
 export function newTable(rows: number, cols: number): Pick<Ann, "cells" | "colW" | "rowH"> {
   return { cells: Array.from({ length: rows }, () => Array<string>(cols).fill("")), colW: even(cols), rowH: even(rows) };
 }
@@ -93,17 +123,20 @@ export function newTable(rows: number, cols: number): Pick<Ann, "cells" | "colW"
 /** Add a row after `at` (same height as it) or remove row `at`. The other rows keep their size; the table grows or shrinks. */
 export function tableRow(a: Ann, at: number, op: "add" | "remove"): Partial<Ann> {
   const cells = [...(a.cells ?? [[""]])];
+  const fmt = fmtGrid(a);
   const abs = rowsOf(a).map((f) => f * a.h);
   if (op === "add") {
     abs.splice(at + 1, 0, abs[at]);
     cells.splice(at + 1, 0, Array<string>(cells[0].length).fill(""));
+    fmt.splice(at + 1, 0, fmt[at].map((f) => (f ? { ...f } : null))); // a new row looks like the one above it
   } else {
     if (cells.length < 2) return {};
     abs.splice(at, 1);
     cells.splice(at, 1);
+    fmt.splice(at, 1);
   }
   const h = abs.reduce((s, v) => s + v, 0);
-  return { cells, rowH: abs.map((v) => v / h), h };
+  return { cells, rowH: abs.map((v) => v / h), h, cellFmt: fmt };
 }
 
 /** Same as tableRow, for a column; the table grows or shrinks on the right. */
@@ -116,10 +149,15 @@ export function tableCol(a: Ann, at: number, op: "add" | "remove"): Partial<Ann>
     else r.splice(at, 1);
     return r;
   });
+  const cellFmt = fmtGrid(a).map((row) => {
+    if (op === "add") row.splice(at + 1, 0, row[at] ? { ...row[at] } : null);
+    else row.splice(at, 1);
+    return row;
+  });
   if (op === "add") abs.splice(at + 1, 0, abs[at]);
   else abs.splice(at, 1);
   const w = abs.reduce((s, v) => s + v, 0);
-  return { cells, colW: abs.map((v) => v / w), w };
+  return { cells, colW: abs.map((v) => v / w), w, cellFmt };
 }
 
 export interface PdfData {
