@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, ImageIcon, Minus, MousePointer2, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -8,115 +8,19 @@ import { findLinks, isSafeHref, openLink } from "../../lib/links";
 import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
 import { uid } from "../../lib/store";
-import { Missing, TitleBar, usePane } from "../../ui";
+import { Menu, Missing, TitleBar, usePane } from "../../ui";
 import { rasterizePage } from "./redact";
+import { exportAs, type OtherFormat } from "./exportOther";
+import { blockAt, pageText, type TextRun } from "./text";
 import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields, type FieldInfo } from "./exportPdf";
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { isBoldName, matchFont } from "./fonts";
 import { askAi, getGroqKey, setGroqKey, type AiOp } from "./ai";
-import { CSS_FONT, FONT_LABEL, lineEnds, type Ann, type Font, type PdfData, type Span } from "./types";
+import { CELL_PAD, colsOf, CSS_FONT, FONT_LABEL, HEAD_FILL, lineEnds, newTable, rowsOf, tableCol, tableRow, type Ann, type Font, type PdfData, type Span } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 type PageLink = { x: number; y: number; w: number; h: number; href: string };
-
-/** A run of text already printed on the page, in page points from the top-left. */
-export type TextRun = { x: number; top: number; w: number; h: number; baseline: number; size: number; str: string; fontName: string; family: string };
-
-async function pageText(doc: PDFDocumentProxy, index: number): Promise<TextRun[]> {
-  const page = await doc.getPage(index + 1);
-  const vp = page.getViewport({ scale: 1 });
-  const tc = await page.getTextContent();
-  const runs: TextRun[] = [];
-  for (const item of tc.items) {
-    if (!("str" in item) || !item.str.trim()) continue;
-    const m = pdfjs.Util.transform(vp.transform, item.transform);
-    if (Math.abs(m[1]) > 0.01 || Math.abs(m[2]) > 0.01) continue; // rotated text isn't editable
-    const size = Math.hypot(m[2], m[3]);
-    if (!size) continue;
-    const style = tc.styles[item.fontName] ?? {};
-    const ascent = style.ascent || 0.8;
-    const descent = style.descent || -0.2;
-    runs.push({ x: m[4], top: m[5] - ascent * size, w: item.width, h: (ascent - descent) * size, baseline: m[5], size, str: item.str, fontName: item.fontName, family: style.fontFamily ?? "" });
-  }
-  return runs;
-}
-
-const BULLET = /^\s*([•▪◦‣∙·\-–—*]|\d{1,2}[.)])\s/;
-
-/**
- * The block of text a click belongs to: the run's whole line (fragments split by bold or
- * style changes), plus the following lines of the same paragraph — same size, same spacing,
- * lined up with the first line. A new bullet starts a new block.
- */
-function blockAt(all: TextRun[], hit: TextRun) {
-  const size = hit.size;
-  const same = (r: TextRun) => Math.abs(r.size - size) < size * 0.06;
-  const lineOf = (seed: TextRun) => {
-    const row = all.filter((r) => same(r) && Math.abs(r.baseline - seed.baseline) < size * 0.3).sort((a, b) => a.x - b.x);
-    let lo = row.indexOf(seed);
-    let hi = lo;
-    while (lo > 0 && row[lo].x - (row[lo - 1].x + row[lo - 1].w) < size * 1.5) lo--;
-    while (hi < row.length - 1 && row[hi + 1].x - (row[hi].x + row[hi].w) < size * 1.5) hi++;
-    return row.slice(lo, hi + 1);
-  };
-  const text = (line: TextRun[]) =>
-    line.reduce((t, r, i) => {
-      if (!i) return r.str;
-      const gap = r.x - (line[i - 1].x + line[i - 1].w);
-      return t + (gap > size * 0.12 && !/\s$/.test(t) && !/^\s/.test(r.str) ? " " : "") + r.str;
-    }, "");
-  const lines = [lineOf(hit)];
-  // After a bullet, only lines indented like the bullet's text belong to it.
-  const bullet = BULLET.test(text(lines[0]));
-  const anchors = bullet ? lines[0].slice(1, 2).map((r) => r.x) : lines[0].map((r) => r.x);
-  const aligned = (line: TextRun[]) =>
-    anchors.length
-      ? anchors.some((x) => Math.abs(line[0].x - x) < size * 0.25)
-      : line[0].x > lines[0][0].x + size * 0.4 && line[0].x < lines[0][0].x + size * 3;
-  const step = (from: TextRun[], dir: 1 | -1) => {
-    const b = from[0].baseline;
-    const near = all
-      .filter((r) => same(r) && (dir > 0 ? r.baseline > b + size * 0.8 && r.baseline < b + size * 2.2 : r.baseline < b - size * 0.8 && r.baseline > b - size * 2.2))
-      .sort((p, q) => dir * (p.baseline - q.baseline) || p.x - q.x);
-    return near.length ? lineOf(near[0]) : null;
-  };
-  let lead = 0;
-  for (let cur = lines[0]; ; ) {
-    const next = step(cur, 1);
-    if (!next || !aligned(next) || BULLET.test(text(next))) break;
-    const d = next[0].baseline - cur[0].baseline;
-    if (lead && Math.abs(d - lead) > size * 0.2) break;
-    lead = d;
-    lines.push(next);
-    cur = next;
-  }
-  if (!bullet) {
-    for (let cur = lines[0]; ; ) {
-      const prev = step(cur, -1);
-      if (!prev || !aligned(prev)) break;
-      const d = cur[0].baseline - prev[0].baseline;
-      if (lead && Math.abs(d - lead) > size * 0.2) break;
-      lead = d;
-      lines.unshift(prev);
-      cur = prev;
-      if (BULLET.test(text(prev))) break;
-    }
-  }
-  const runs = lines.flat();
-  const x0 = Math.min(...runs.map((r) => r.x));
-  const top = Math.min(...runs.map((r) => r.top));
-  return {
-    runs,
-    lines,
-    gapBefore: (line: TextRun[], i: number) => i > 0 && line[i].x - (line[i - 1].x + line[i - 1].w) > size * 0.12,
-    text: lines.map(text).join("\n"),
-    x: Math.min(...lines[0].map((r) => r.x)),
-    baseline: lines[0][0].baseline,
-    lead: lead || size * 1.2,
-    box: { x: x0, y: top, w: Math.max(...runs.map((r) => r.x + r.w)) - x0, h: Math.max(...runs.map((r) => r.top + r.h)) - top },
-  };
-}
 
 /** Where the first baseline sits in a text box drawn with this font, size and line spacing. */
 function measureBaseline(font: Font, bold: boolean, size: number, lead: number) {
@@ -170,8 +74,8 @@ async function pageLinks(doc: PDFDocumentProxy, index: number): Promise<PageLink
   return out;
 }
 
-type Tool = "select" | "edit" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross";
-const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "redact", "rect", "line"];
+type Tool = "select" | "edit" | "text" | "date" | "sign" | "initials" | "image" | "highlight" | "whiteout" | "redact" | "rect" | "line" | "check" | "cross" | "table";
+const DRAG_TOOLS: Tool[] = ["highlight", "whiteout", "redact", "rect", "line", "table"];
 const TOOLS: [Tool, typeof Type, string][] = [
   ["select", MousePointer2, "Select"],
   ["edit", TextCursorInput, "Edit text"],
@@ -187,7 +91,11 @@ const TOOLS: [Tool, typeof Type, string][] = [
   ["redact", EyeOff, "Black out (drag)"],
   ["rect", Square, "Box (drag)"],
   ["line", Minus, "Line (drag)"],
+  ["table", Table2, "Table (drag)"],
 ];
+
+/** The table cell typed in last, so row and column buttons know where to insert. */
+const lastCell = { id: "", r: -1, c: -1 };
 
 type Size = { w: number; h: number };
 
@@ -206,6 +114,7 @@ export default function Pdf({ id }: { id: string }) {
   const [showFields, setShowFields] = useState(true);
   const [busy, setBusy] = useState("");
   const [showAi, setShowAi] = useState(false);
+  const [dims, setDims] = useState({ rows: 3, cols: 3 });
   const past = useRef<PdfData[]>([]);
   const future = useRef<PdfData[]>([]);
   const lastEdit = useRef({ key: "", at: 0 });
@@ -318,7 +227,7 @@ export default function Pdf({ id }: { id: string }) {
       if (e.key === "Escape") { setTool("select"); setSelected(null); setPending(null); }
       if (!editing && selected && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); remove(selected); }
       // Text boxes are ours to undo; other fields (rename, AI box) keep the browser's own undo.
-      if (mod && !e.altKey && (k === "z" || k === "y") && (!editing || el.classList.contains("ann-text"))) {
+      if (mod && !e.altKey && (k === "z" || k === "y") && (!editing || el.classList.contains("ann-text") || el.classList.contains("ann-cell"))) {
         e.preventDefault();
         if (k === "y" || e.shiftKey) redo();
         else undo();
@@ -481,6 +390,19 @@ export default function Pdf({ id }: { id: string }) {
   const blankAfter = (i: number) =>
     pageOp("Adding page…", () => insertBlankPage(data.bytes, i + 1), (anns) => anns.map((a) => (a.page > i ? { ...a, page: a.page + 1 } : a)));
 
+  async function downloadAs(format: OtherFormat) {
+    if (!doc) return;
+    setBusy(format === "docx" ? "Building Word file…" : format === "png" ? "Drawing pages…" : "Reading text…");
+    try {
+      const out = await exportAs(format, data, doc, rasterizePage, safeName(f.meta!.name));
+      await saveAs(out.name, out.bytes);
+    } catch (e) {
+      toast(`Couldn’t export: ${errorText(e)}`, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function download() {
     const blackedOut = new Set(data.anns.filter((a) => a.type === "redact").map((a) => a.page)).size;
     const one = blackedOut === 1;
@@ -594,7 +516,12 @@ export default function Pdf({ id }: { id: string }) {
       <TitleBar meta={f.meta} onRename={f.rename} saved={f.saved} app="pdf">
         {busy && <span className="muted">{busy}</span>}
         <button onClick={() => mergeInput.current?.click()} title="Add all pages of another PDF to the end of this one">Add pages from a PDF…</button>
-        <button className="primary" onClick={download} disabled={!!busy}>Download PDF</button>
+        <Menu label="Download" className="primary" disabled={!!busy}>
+          <button onClick={download}>PDF document (.pdf)</button>
+          <button onClick={() => downloadAs("docx")} disabled={!doc}>Word document (.docx)</button>
+          <button onClick={() => downloadAs("png")} disabled={!doc}>{sizes.length > 1 ? "Pictures of pages (.png, zipped)" : "Picture (.png)"}</button>
+          <button onClick={() => downloadAs("txt")} disabled={!doc}>Plain text (.txt)</button>
+        </Menu>
       </TitleBar>
       <div className="toolbar pdf-tools">
         {TOOLS.map(([t, Icon, label]) => (
@@ -627,9 +554,31 @@ export default function Pdf({ id }: { id: string }) {
               <button className={sel.bold ? "on" : ""} onClick={() => restyle(sel, { bold: !sel.bold })}><b>B</b></button>
             </>
           )}
-          {(sel.type === "line" || sel.type === "rect") && (
-            <select value={sel.thick ?? (sel.type === "line" ? 1.5 : 2)} title="Thickness" onChange={(e) => update(sel.id, { thick: Number(e.target.value) })}>
-              {[...new Set([0.5, 1, 1.5, 2, 3, 4, 6, 8, sel.thick ?? (sel.type === "line" ? 1.5 : 2)])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
+          {sel.type === "table" && (() => {
+            const at = lastCell.id === sel.id ? lastCell : { r: (sel.cells?.length ?? 1) - 1, c: (sel.cells?.[0]?.length ?? 1) - 1 };
+            const rows = sel.cells?.length ?? 1;
+            const cols = sel.cells?.[0]?.length ?? 1;
+            const change = (p: Partial<Ann>) => {
+              if (!Object.keys(p).length) return;
+              lastCell.id = "";
+              update(sel.id, p);
+            };
+            return (
+              <>
+                <select value={sel.size ?? 10} title="Text size" onChange={(e) => update(sel.id, { size: Number(e.target.value) })}>
+                  {[...new Set([7, 8, 9, 10, 11, 12, 14, 16, 18, 24, sel.size ?? 10])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} pt</option>)}
+                </select>
+                <button className={sel.head ? "on" : ""} title="Bold, shaded first row" onClick={() => update(sel.id, { head: !sel.head })}>Header row</button>
+                <button title={`Add a row below row ${at.r + 1}`} onClick={() => change(tableRow(sel, at.r, "add"))}>+ Row</button>
+                <button title={`Remove row ${at.r + 1}`} disabled={rows < 2} onClick={() => change(tableRow(sel, at.r, "remove"))}>− Row</button>
+                <button title={`Add a column right of column ${at.c + 1}`} onClick={() => change(tableCol(sel, at.c, "add"))}>+ Column</button>
+                <button title={`Remove column ${at.c + 1}`} disabled={cols < 2} onClick={() => change(tableCol(sel, at.c, "remove"))}>− Column</button>
+              </>
+            );
+          })()}
+          {(sel.type === "line" || sel.type === "rect" || sel.type === "table") && (
+            <select value={sel.thick ?? (sel.type === "line" ? 1.5 : sel.type === "table" ? 1 : 2)} title="Thickness" onChange={(e) => update(sel.id, { thick: Number(e.target.value) })}>
+              {[...new Set([...(sel.type === "table" ? [0] : []), 0.5, 1, 1.5, 2, 3, 4, 6, 8, sel.thick ?? (sel.type === "line" ? 1.5 : sel.type === "table" ? 1 : 2)])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n ? `${n} pt` : "No lines"}</option>)}
             </select>
           )}
           <button onClick={() => add({ ...sel, x: sel.x + 12, y: sel.y + 12, x2: sel.x2 === undefined ? undefined : sel.x2 + 12, y2: sel.y2 === undefined ? undefined : sel.y2 + 12 })}>Duplicate</button>
@@ -638,7 +587,13 @@ export default function Pdf({ id }: { id: string }) {
       )}
       {tool !== "select" && (
         <div className="hint-bar">
-          {tool === "edit"
+          {tool === "table" ? (
+            <>
+              <label>Rows <input type="number" min={1} max={50} value={dims.rows} onChange={(e) => setDims({ ...dims, rows: Math.min(50, Math.max(1, Number(e.target.value) || 1)) })} /></label>{" "}
+              <label>Columns <input type="number" min={1} max={20} value={dims.cols} onChange={(e) => setDims({ ...dims, cols: Math.min(20, Math.max(1, Number(e.target.value) || 1)) })} /></label>{" "}
+              Drag on the page to draw the table, or click for a standard size.
+            </>
+          ) : tool === "edit"
             ? "Click a line of text to change it. Tip: with Select, double-click text to do the same."
             : tool === "redact"
             ? "Drag over anything you want gone for good. It’s deleted from the file you download, not just hidden."
@@ -676,7 +631,13 @@ export default function Pdf({ id }: { id: string }) {
                   selected={selected}
                   onSelect={setSelected}
                   onPlace={(x, y) => place(i, x, y)}
-                  onDraw={(r) => add({ page: i, type: tool as Ann["type"], ...r, color: tool === "highlight" ? "#ffeb3b" : tool === "whiteout" ? "#ffffff" : tool === "rect" ? "#e53935" : "#000000" })}
+                  onDraw={(r) => {
+                    if (tool !== "table") return void add({ page: i, type: tool as Ann["type"], ...r, color: tool === "highlight" ? "#ffeb3b" : tool === "whiteout" ? "#ffffff" : tool === "rect" ? "#e53935" : "#000000" });
+                    if (!r.w) r = { ...r, w: Math.max(60, Math.min(360, size.w - r.x - 24)), h: dims.rows * 20 };
+                    const t = add({ page: i, type: "table", ...r, ...newTable(dims.rows, dims.cols), head: true, size: 10, thick: 1, color: "#000000" });
+                    setTool("select");
+                    setFocusText(t.id);
+                  }}
                   onChange={update}
                   onRemove={remove}
                   onEditRun={(run, all) => editRun(i, run, all)}
@@ -907,6 +868,7 @@ function PageView(props: {
           const far = Math.hypot(draft.x - draft.x0, draft.y - draft.y0) >= 4;
           return props.onDraw({ x: draft.x0, y: draft.y0, w: 0, h: 0, x2: far ? draft.x : draft.x0 + 100, y2: far ? draft.y : draft.y0 });
         }
+        if (tool === "table" && (r.w < 12 || r.h < 12)) r = { x: draft.x0, y: draft.y0, w: 0, h: 0 };
         if (r.w < 4 && r.h < 4) r = { x: draft.x0 - 50, y: draft.y0 - 8, w: 100, h: 16 };
         props.onDraw(r);
       }}
@@ -1014,7 +976,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
     else el.innerText = a.text ?? "";
   }, [a.type, a.text, a.spans]);
 
-  function drag(e: React.PointerEvent, mode: "move" | "p1" | "p2" | "rotate" | Handle) {
+  function drag(e: React.PointerEvent, mode: "move" | "p1" | "p2" | "rotate" | Handle | `col${number}` | `row${number}`) {
     e.stopPropagation();
     const start = { x: e.clientX, y: e.clientY, a: { x: a.x, y: a.y, w: a.w, h: a.h } };
     const rot = ((a.rot ?? 0) * Math.PI) / 180;
@@ -1028,6 +990,17 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
       if (a.type === "line") {
         const [x1, y1, x2, y2] = lineEnds(a);
         last = mode === "p1" ? { x: x1 + dx, y: y1 + dy, x2, y2 } : mode === "p2" ? { x: x1, y: y1, x2: x2 + dx, y2: y2 + dy } : { x: x1 + dx, y: y1 + dy, x2: x2 + dx, y2: y2 + dy };
+      } else if (mode.startsWith("col") || mode.startsWith("row")) {
+        // A table divider: the two neighbours trade size, nothing else moves.
+        const col = mode.startsWith("col");
+        const i = Number(mode.slice(3));
+        const total = col ? a.w : a.h;
+        const fr = [...(col ? colsOf(a) : rowsOf(a))];
+        const min = 8 / total;
+        const d = Math.max(min - fr[i], Math.min(fr[i + 1] - min, (col ? dx : dy) / total));
+        fr[i] += d;
+        fr[i + 1] -= d;
+        last = col ? { colW: fr } : { rowH: fr };
       } else if (mode === "move") last = { x: start.a.x + dx, y: start.a.y + dy };
       else if (mode === "rotate") {
         let deg = (Math.atan2(ev.clientY - center.y, ev.clientX - center.x) * 180) / Math.PI + 90;
@@ -1073,7 +1046,7 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
   if (a.type !== "text" && a.type !== "line") Object.assign(box, { width: v.w * scale, height: v.h * scale });
   if (v.rot) box.transform = `rotate(${v.rot}deg)`;
   const keepShape = a.type === "image" || a.type === "check" || a.type === "cross";
-  const turnable = a.type !== "text" && a.type !== "line" && a.type !== "redact";
+  const turnable = a.type !== "text" && a.type !== "line" && a.type !== "redact" && a.type !== "table";
 
   let body: React.ReactNode = null;
   switch (a.type) {
@@ -1097,6 +1070,75 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
         />
       );
       break;
+    case "table": {
+      const cw = colsOf(v);
+      const rh = rowsOf(v);
+      const at = (fr: number[], i: number) => fr.slice(0, i).reduce((s, x) => s + x, 0) * 100;
+      const size = (a.size ?? 10) * scale;
+      const thick = (a.thick ?? 1) * scale;
+      const rows = a.cells ?? [];
+      /** Typing keeps the words in the cell: a row too short for them grows, and the table with it. */
+      const typed = (r: number, c: number, text: string, el: HTMLElement) => {
+        const cells = rows.map((row) => [...row]);
+        cells[r][c] = text;
+        const patch: Partial<Ann> = { cells };
+        const abs = rowsOf(a).map((f) => f * a.h);
+        const need = el.scrollHeight / scale;
+        if (need > abs[r] + 0.5) {
+          abs[r] = need;
+          const h = abs.reduce((s, x) => s + x, 0);
+          Object.assign(patch, { rowH: abs.map((x) => x / h), h });
+        }
+        onChange(patch);
+      };
+      const step = (el: HTMLElement, by: number) => {
+        const all = [...el.parentElement!.querySelectorAll<HTMLElement>(".ann-cell")];
+        const i = all.indexOf(el) + by;
+        if (i >= all.length) {
+          // Tab in the last cell starts a new row, as in a word processor.
+          onChange(tableRow(a, rows.length - 1, "add"));
+          setTimeout(() => focusCell([...el.parentElement!.querySelectorAll<HTMLElement>(".ann-cell")][i]));
+        } else if (i >= 0) focusCell(all[i]);
+      };
+      body = (
+        <div className="ann-table">
+          {a.head && <div className="head" style={{ height: `${rh[0] * 100}%`, background: HEAD_FILL }} />}
+          {rows.map((row, r) =>
+            row.map((t, c) => (
+              <Cell
+                key={`${r}-${c}`}
+                value={t}
+                autoFocus={focus && r === 0 && c === 0}
+                style={{
+                  left: `${at(cw, c)}%`, top: `${at(rh, r)}%`, width: `${cw[c] * 100}%`, height: `${rh[r] * 100}%`, padding: CELL_PAD * scale,
+                  fontSize: size, lineHeight: `${size * 1.2}px`, fontFamily: CSS_FONT[a.font ?? "helv"], fontWeight: a.head && r === 0 ? 700 : 400, color: a.color,
+                }}
+                onFocus={() => {
+                  Object.assign(lastCell, { id: a.id, r, c });
+                  onSelect();
+                }}
+                onText={(text, el) => typed(r, c, text, el)}
+                onTab={(el, back) => step(el, back ? -1 : 1)}
+              />
+            )),
+          )}
+          {thick > 0 && (
+            <svg width="100%" height="100%">
+              <rect x="0" y="0" width="100%" height="100%" fill="none" stroke={a.color ?? "#000000"} strokeWidth={thick} />
+              {cw.slice(0, -1).map((_, c) => <line key={`c${c}`} x1={`${at(cw, c + 1)}%`} x2={`${at(cw, c + 1)}%`} y1="0" y2="100%" stroke={a.color ?? "#000000"} strokeWidth={thick} />)}
+              {rh.slice(0, -1).map((_, r) => <line key={`r${r}`} y1={`${at(rh, r + 1)}%`} y2={`${at(rh, r + 1)}%`} x1="0" x2="100%" stroke={a.color ?? "#000000"} strokeWidth={thick} />)}
+            </svg>
+          )}
+          {selected && (
+            <>
+              {cw.slice(0, -1).map((_, c) => <span key={`dc${c}`} className="tdiv col" title="Drag to change column widths" style={{ left: `${at(cw, c + 1)}%` }} onPointerDown={(e) => { e.preventDefault(); drag(e, `col${c}`); }} />)}
+              {rh.slice(0, -1).map((_, r) => <span key={`dr${r}`} className="tdiv row" title="Drag to change row heights" style={{ top: `${at(rh, r + 1)}%` }} onPointerDown={(e) => { e.preventDefault(); drag(e, `row${r}`); }} />)}
+            </>
+          )}
+        </div>
+      );
+      break;
+    }
     case "image":
       body = <img src={a.src} alt="" draggable={false} />;
       break;
@@ -1129,12 +1171,12 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
     <div
       className={`ann ann-${a.type}` + (selected ? " sel" : "")}
       style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : a.type === "rect" ? { borderColor: a.color, borderWidth: (a.thick ?? 2) * scale } : {}) }}
-      onPointerDown={(e) => { if (a.type === "text" && e.target !== e.currentTarget) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
+      onPointerDown={(e) => { if ((a.type === "text" || a.type === "table") && e.target !== e.currentTarget) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
     >
       {body}
       {selected && (
         <>
-          {a.type === "text" && <span className="grip" title="Drag to move" onPointerDown={(e) => { e.preventDefault(); drag(e, "move"); }}><GripVertical size={14} /></span>}
+          {(a.type === "text" || a.type === "table") && <span className="grip" title="Drag to move" onPointerDown={(e) => { e.preventDefault(); drag(e, "move"); }}><GripVertical size={14} /></span>}
           {a.type === "line" && (
             <>
               <span className="handle" style={{ left: lx1 * scale - Math.min(lx1, lx2) * scale + LINE_PAD, top: ly1 * scale - Math.min(ly1, ly2) * scale + LINE_PAD }} onPointerDown={(e) => { e.preventDefault(); drag(e, "p1"); }} />
@@ -1150,5 +1192,51 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove }: { 
         </>
       )}
     </div>
+  );
+}
+
+function focusCell(el?: HTMLElement) {
+  if (!el) return;
+  el.focus();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  getSelection()?.removeAllRanges();
+  getSelection()?.addRange(range);
+}
+
+/** One table cell: plain text typed in place. Undo and redo change `value` from outside. */
+function Cell({ value, autoFocus, style, onFocus, onText, onTab }: { value: string; autoFocus: boolean; style: React.CSSProperties; onFocus: () => void; onText: (text: string, el: HTMLElement) => void; onTab: (el: HTMLElement, back: boolean) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current!;
+    if (el.innerText.replace(/\n$/, "") !== value) el.innerText = value;
+  }, [value]);
+  useEffect(() => {
+    if (autoFocus) focusCell(ref.current!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="ann-cell"
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={false}
+      style={style}
+      onFocus={onFocus}
+      onPointerDown={(e) => e.stopPropagation()}
+      onInput={(e) => onText(e.currentTarget.innerText.replace(/\n$/, ""), e.currentTarget)}
+      onPaste={(e) => {
+        // Paste as plain text: the cell holds words, not formatting.
+        e.preventDefault();
+        document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Tab") return;
+        e.preventDefault();
+        onTab(e.currentTarget, e.shiftKey);
+      }}
+    />
   );
 }

@@ -11,6 +11,9 @@ const MIME: Record<string, string> = {
   html: "text/html",
   txt: "text/plain",
   json: "application/json",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  png: "image/png",
+  zip: "application/zip",
 };
 
 /** Save bytes to disk: a native "Save as" dialog on desktop, a download in a browser. */

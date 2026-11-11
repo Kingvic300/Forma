@@ -1,7 +1,7 @@
 import fontkit from "@pdf-lib/fontkit";
 import { degrees, PDFArray, PDFCheckBox, PDFDict, PDFDocument, PDFDropdown, PDFRadioGroup, PDFRef, PDFStream, PDFTextField, rgb, type PDFFont, type PDFObject } from "pdf-lib";
 import { fontBytes } from "./fonts";
-import { lineEnds, type Ann, type Font, type PdfData, type Span } from "./types";
+import { CELL_PAD, cellBaseline, colsOf, HEAD_FILL, lineEnds, rowsOf, type Ann, type Font, type PdfData, type Span } from "./types";
 
 const hex = (h = "#000000") => {
   const n = parseInt(h.slice(1), 16);
@@ -10,6 +10,31 @@ const hex = (h = "#000000") => {
 
 /** Lines of the annotation as weighted pieces. */
 const linesOf = (a: Ann): Span[][] => a.spans ?? (a.text ?? "").split("\n").map((t) => [{ t, b: a.bold }]);
+
+/** Break text into lines no wider than `max`, at spaces where possible, like CSS pre-wrap with overflow-wrap: anywhere. */
+export function wrap(text: string, max: number, width: (s: string) => number): string[] {
+  const out: string[] = [];
+  for (const para of text.split("\n")) {
+    let line = "";
+    for (let w of para.match(/\S+\s*|\s+/g) ?? []) {
+      if (width((line + w).trimEnd()) <= max) {
+        line += w;
+        continue;
+      }
+      if (line) out.push(line.trimEnd());
+      // A word wider than the cell breaks between letters.
+      while (w.length > 1 && width(w.trimEnd()) > max) {
+        let n = 1;
+        while (n < w.length && width(w.slice(0, n + 1)) <= max) n++;
+        out.push(w.slice(0, n));
+        w = w.slice(n);
+      }
+      line = w;
+    }
+    out.push(line.trimEnd());
+  }
+  return out;
+}
 
 export interface FieldInfo {
   name: string;
@@ -83,7 +108,7 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
     const X = (x: number) => box.x + x;
     const Y = (y: number) => box.y + box.height - y; // flip: PDF origin is bottom-left
     // Boxes, images and marks can be turned about their centre (clockwise on screen).
-    const rot = a.type === "redact" || a.type === "text" || a.type === "line" ? 0 : a.rot ?? 0;
+    const rot = a.type === "redact" || a.type === "text" || a.type === "line" || a.type === "table" ? 0 : a.rot ?? 0;
     const cx = a.x + a.w / 2;
     const cy = a.y + a.h / 2;
     const sin = Math.sin((rot * Math.PI) / 180);
@@ -111,6 +136,39 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
           x += f.widthOfTextAtSize(t, size);
         }
       }
+    }
+    async function drawTable(a: Ann) {
+      const cells = a.cells ?? [];
+      const cw = colsOf(a).map((f) => f * a.w);
+      const rh = rowsOf(a).map((f) => f * a.h);
+      const size = a.size ?? 10;
+      const c = hex(a.color);
+      const thick = a.thick ?? 1;
+      let y = a.y;
+      for (let r = 0; r < cells.length; r++) {
+        const head = !!a.head && r === 0;
+        if (head) page.drawRectangle({ x: X(a.x), y: Y(y + rh[r]), width: a.w, height: rh[r], color: hex(HEAD_FILL) });
+        const f = await font(a.font, head);
+        const width = (t: string) => f.widthOfTextAtSize(t, size);
+        let x = a.x;
+        for (let k = 0; k < cw.length; k++) {
+          const lines = wrap(cells[r][k] ?? "", cw[k] - CELL_PAD * 2, width);
+          for (let i = 0; i < lines.length; i++) {
+            const base = y + cellBaseline(size) + i * size * 1.2;
+            if (base > y + rh[r]) break; // clipped, as on screen
+            const t = lines[i].trimStart();
+            if (t) page.drawText(t, { x: X(x + CELL_PAD) + width(lines[i].slice(0, lines[i].length - t.length)), y: Y(base), size, font: f, color: c });
+          }
+          x += cw[k];
+        }
+        y += rh[r];
+      }
+      if (thick <= 0) return;
+      page.drawRectangle({ x: X(a.x), y: Y(a.y + a.h), width: a.w, height: a.h, borderColor: c, borderWidth: thick });
+      let at = a.x;
+      for (const w of cw.slice(0, -1)) page.drawLine({ start: { x: X((at += w)), y: Y(a.y) }, end: { x: X(at), y: Y(a.y + a.h) }, thickness: thick, color: c });
+      at = a.y;
+      for (const h of rh.slice(0, -1)) page.drawLine({ start: { x: X(a.x), y: Y((at += h)) }, end: { x: X(a.x + a.w), y: Y(at) }, thickness: thick, color: c });
     }
     function draw(a: Ann) {
       switch (a.type) {
@@ -145,6 +203,7 @@ export async function buildPdf(data: PdfData, rasterize?: Rasterize): Promise<Ui
       }
     }
     if (a.type === "text") await drawText(a);
+    if (a.type === "table") await drawTable(a);
     if (a.type === "image" && a.src) {
       let img = images.get(a.src);
       if (!img) images.set(a.src, (img = await pdf.embedPng(a.src)));

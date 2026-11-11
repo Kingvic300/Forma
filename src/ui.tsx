@@ -92,12 +92,12 @@ export function AppSwitcher({ current, open, setOpen, onPick }: { current: AppId
   );
 }
 
-export function Menu({ label, children, align = "right" }: { label: ReactNode; children: ReactNode; align?: "left" | "right" }) {
+export function Menu({ label, children, align = "right", className, disabled }: { label: ReactNode; children: ReactNode; align?: "left" | "right"; className?: string; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useDismiss(open, setOpen);
   return (
     <div className="menu" ref={ref}>
-      <button aria-haspopup="menu" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
+      <button className={className} disabled={disabled} aria-haspopup="menu" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
         {label} <ChevronDown className="chev" />
       </button>
       {open && (
