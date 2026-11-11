@@ -597,6 +597,17 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .page-wrap { margin: 0 auto 22px; }
 .page-bar { display: flex; align-items: center; gap: 2px; padding: 0 0 6px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .page-bar button { height: 24px; }
+.page-grip { cursor: grab; touch-action: none; }
+.page-wrap { position: relative; }
+.page-wrap.drop-before::before, .page-wrap.drop-after::after { content: ""; position: absolute; left: -8px; right: -8px; height: 3px; border-radius: 2px; background: #22d3ee; box-shadow: 0 0 12px rgba(34, 211, 238, 0.7); pointer-events: none; }
+.page-wrap.drop-before::before { top: -12px; }
+.page-wrap.drop-after::after { bottom: -12px; }
+.page.drop-target { box-shadow: 0 0 0 3px #22d3ee, 0 18px 50px -12px rgba(0, 0, 0, 0.6); }
+.drag-ghost { position: fixed; z-index: 1000; width: 0; height: 0; pointer-events: none; opacity: 0.85; }
+.drag-ghost .ann { pointer-events: none; }
+.drag-ghost .page-thumb { display: block; border-radius: 3px; background: #fff; box-shadow: 0 0 0 2px #22d3ee, 0 12px 32px rgba(0, 0, 0, 0.55); }
+.ann.dragging, .ann.dragging * { pointer-events: none !important; }
+.ann.leaving { opacity: 0.35; }
 .page { position: relative; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 18px 50px -12px rgba(0, 0, 0, 0.6); touch-action: none; }
 .page canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
 .page { -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
@@ -753,6 +764,10 @@ select.answer { width: auto; min-width: 200px; height: 34px; padding: 0 9px; bac
 .split.on .titlebar .title { flex-shrink: 1; min-width: 60px; }
 .split.on .pdf-tools .tl { display: none; }
 .split.on .pdf-tools .tool.on .tl { display: inline; }
+/* A narrow pane wraps the PDF tools onto a second row instead of squeezing them on top of each other. */
+.pdf-tools > * { flex-shrink: 0; }
+.split.on .pdf-tools .grow { display: none; }
+.split.on .pdf-tools { flex-wrap: wrap; row-gap: 2px; padding-top: 4px; padding-bottom: 4px; }
 .split.on .doc-scroll, .split.on .pdf-scroll { padding-left: 12px; padding-right: 12px; }
 .split-divider { flex: none; width: 5px; margin: 0 -2px; z-index: 2; cursor: col-resize; background: linear-gradient(var(--line-soft), var(--line-soft)) center / 1px 100% no-repeat; outline: none; }
 .split-divider:hover, .split-divider:focus-visible, body.resizing .split-divider { background-color: var(--cyan-soft); background-image: linear-gradient(var(--cyan), var(--cyan)); }

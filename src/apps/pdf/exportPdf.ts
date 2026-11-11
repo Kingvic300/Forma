@@ -337,6 +337,17 @@ export async function appendPdf(bytes: Uint8Array, other: Uint8Array) {
   return pdf.save();
 }
 
+export const pageCount = async (bytes: Uint8Array) => (await PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount();
+
+/** Put pages of another PDF (all of them, or the ones listed) into this one before page `at`. */
+export async function insertPages(bytes: Uint8Array, other: Uint8Array, at: number, pages?: number[]) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const src = await PDFDocument.load(other, { ignoreEncryption: true });
+  const copied = await pdf.copyPages(src, pages ?? src.getPageIndices());
+  copied.forEach((p, i) => pdf.insertPage(at + i, p));
+  return pdf.save();
+}
+
 export async function insertBlankPage(bytes: Uint8Array, at: number) {
   const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const ref = pdf.getPage(Math.min(at, pdf.getPageCount() - 1));

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, CalendarDays, Check, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, BringToFront, CalendarDays, Check, ClipboardPaste, Copy, CopyPlus, SendToBack, Scissors, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -12,7 +12,9 @@ import { Menu, Missing, TitleBar, usePane } from "../../ui";
 import { rasterizePage } from "./redact";
 import { exportAs, type OtherFormat } from "./exportOther";
 import { blockAt, pageText, type TextRun } from "./text";
-import { appendPdf, buildPdf, deletePage, insertBlankPage, movePage, readFields, type FieldInfo } from "./exportPdf";
+import { appendPdf, buildPdf, deletePage, insertBlankPage, insertPages, movePage, pageCount, readFields, type FieldInfo } from "./exportPdf";
+import { bounds, cloneAnns, copyBoxes, DROP_ANN, DROP_PAGE, ghost, hasClip, keepOnPage, marker, pasteKind, shiftAnn, takeClip, type AnnDrop, type PageDrop } from "./boxes";
+import { ContextMenu, type MenuEntry } from "../docs/menus";
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { isBoldName, matchFont } from "./fonts";
 import { askAi, getGroqKey, setGroqKey, type AiOp } from "./ai";
@@ -104,6 +106,14 @@ const TOOLS: [Tool, typeof Type, string][] = [
 
 type Size = { w: number; h: number };
 
+/** Where page `p` ends up after the page at `from` moves to `to`. */
+function movedIndex(p: number, from: number, to: number) {
+  if (p === from) return to;
+  if (from < to && p > from && p <= to) return p - 1;
+  if (from > to && p >= to && p < from) return p + 1;
+  return p;
+}
+
 export default function Pdf({ id }: { id: string }) {
   const f = useFile<PdfData>(id);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
@@ -123,6 +133,11 @@ export default function Pdf({ id }: { id: string }) {
   /** The table cell clicked last: row and column buttons and cell formatting act on it. */
   const [cell, setCell] = useState<{ id: string; r: number; c: number } | null>(null);
   const [cellScope, setCellScope] = useState<"cell" | "row" | "col" | "all">("cell");
+  /** Right-click menu: on a box, or on an empty spot of a page (x, y in points there). */
+  const [ctx, setCtx] = useState<{ cx: number; cy: number; page: number; x: number; y: number; ann: string | null } | null>(null);
+  /** Ctrl+V with nothing editable focused: used when the browser sends no paste event for it. */
+  const pasteLater = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const keyPasted = useRef(0);
   /** Thickness and colour for the next line or box drawn; changing a selected one updates these too. */
   const [pen, setPen] = useState<Record<PenKey, Pen>>({
     line: { thick: 1.5, color: "#000000" },
@@ -247,6 +262,30 @@ export default function Pdf({ id }: { id: string }) {
       const k = e.key.toLowerCase();
       if (e.key === "Escape") { setTool("select"); setSelected(null); setPending(null); }
       if (!editing && selected && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); remove(selected); }
+      // In a text box or table with nothing highlighted, copy and cut take the whole box.
+      const wholeBox = !editing || ((el.classList.contains("ann-text") || el.classList.contains("ann-cell")) && !!getSelection()?.isCollapsed);
+      if (wholeBox && f.data && f.meta && selected && mod && !e.altKey && (k === "c" || k === "x")) {
+        if (editing) e.preventDefault();
+        if (k === "c") copySel();
+        else cutSel();
+      }
+      if (!editing && f.data && f.meta) {
+        if (mod && !e.altKey && k === "d" && selected) { e.preventDefault(); duplicate(selected); }
+        if (mod && !e.altKey && k === "v") {
+          // The paste event that follows decides what goes in (boxes, a picture, text); this is the fallback.
+          clearTimeout(pasteLater.current);
+          pasteLater.current = setTimeout(() => {
+            pasteLater.current = undefined;
+            keyPasted.current = Date.now();
+            pasteHere();
+          }, 120);
+        }
+        if (selected && !mod && e.key.startsWith("Arrow")) {
+          e.preventDefault();
+          const d = e.shiftKey ? 10 : 1;
+          nudge(selected, e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0, e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0);
+        }
+      }
       // Text boxes are ours to undo; other fields (rename, AI box) keep the browser's own undo.
       if (mod && !e.altKey && (k === "z" || k === "y") && (!editing || el.classList.contains("ann-text") || el.classList.contains("ann-cell"))) {
         e.preventDefault();
@@ -266,16 +305,44 @@ export default function Pdf({ id }: { id: string }) {
       e.preventDefault();
       zoomBy(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025)));
     };
+    const onPaste = (e: ClipboardEvent) => {
+      if ((pane.split && !pane.active) || !f.data || !f.meta) return;
+      const el = e.target as HTMLElement;
+      if (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
+      clearTimeout(pasteLater.current);
+      const what = pasteKind(e.clipboardData);
+      if (!what) return;
+      e.preventDefault();
+      // The Ctrl+V fallback got there first with the same boxes.
+      if (!pasteLater.current && Date.now() - keyPasted.current < 1000 && what.kind === "boxes") return;
+      pasteLater.current = undefined;
+      if (what.kind === "boxes") pasteHere();
+      else if (what.kind === "image") imageToPng(what.file).then((src) => addImageAt(src)).catch((err) => toast(errorText(err), "error"));
+      else addTextAt(what.text);
+    };
     const stop = (e: Event) => e.preventDefault();
     addEventListener("keydown", onKey);
+    addEventListener("paste", onPaste);
     addEventListener("wheel", onWheel, { passive: false });
     for (const g of ["gesturestart", "gesturechange", "gestureend"]) addEventListener(g, stop);
     return () => {
       removeEventListener("keydown", onKey);
+      removeEventListener("paste", onPaste);
       removeEventListener("wheel", onWheel);
       for (const g of ["gesturestart", "gesturechange", "gestureend"]) removeEventListener(g, stop);
     };
   });
+
+  // A page dragged here from the other side (or from elsewhere in this PDF).
+  const onPageDrop = useRef<(d: PageDrop) => void>(() => {});
+  const hasData = !!f.data;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const h = (e: Event) => onPageDrop.current((e as CustomEvent<PageDrop>).detail);
+    el.addEventListener(DROP_PAGE, h);
+    return () => el.removeEventListener(DROP_PAGE, h);
+  }, [hasData]);
 
   if (f.missing) return <Missing app="pdf" />;
   if (!f.data || !f.meta) return <div className="loading">Loading…</div>;
@@ -295,6 +362,226 @@ export default function Pdf({ id }: { id: string }) {
       return { ...d, anns: d.anns.filter((a) => a.id !== aid && a.id !== cover) };
     });
     setSelected(null);
+  }
+
+
+  /** The page most in view in this pane. */
+  function viewPage() {
+    const el = scroller.current;
+    let best = 0;
+    let most = -Infinity;
+    if (el) {
+      const v = el.getBoundingClientRect();
+      el.querySelectorAll<HTMLElement>(".page").forEach((p) => {
+        const r = p.getBoundingClientRect();
+        const seen = Math.min(r.bottom, v.bottom) - Math.max(r.top, v.top);
+        if (seen > most) [most, best] = [seen, Number(p.dataset.index)];
+      });
+    }
+    return best;
+  }
+  /** The middle of what is in view of that page, in points. */
+  function viewPoint(page: number) {
+    const p = scroller.current?.querySelector<HTMLElement>(`.page[data-index="${page}"]`);
+    const v = scroller.current?.getBoundingClientRect();
+    if (!p || !v) return { x: sizes[page].w / 2, y: sizes[page].h / 2 };
+    const r = p.getBoundingClientRect();
+    const cx = (Math.max(r.left, v.left) + Math.min(r.right, v.right)) / 2;
+    const cy = (Math.max(r.top, v.top) + Math.min(r.bottom, v.bottom)) / 2;
+    return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
+  }
+  /** Add new boxes to a page, nudged to stay on it, and select the last one. */
+  function putAnns(list: Ann[], page: number) {
+    if (!list.length || !sizes[page]) return;
+    const { dx, dy } = keepOnPage(list, sizes[page]);
+    const fresh = list.map((a) => shiftAnn(a, dx, dy));
+    mutate((d) => ({ ...d, anns: [...d.anns, ...fresh] }));
+    setSelected(fresh[fresh.length - 1].id);
+  }
+  function copySel() {
+    const a = f.data?.anns.find((x) => x.id === selected);
+    if (a) copyBoxes([a], id, a.page);
+  }
+  function cutSel() {
+    const a = f.data?.anns.find((x) => x.id === selected);
+    if (!a) return;
+    copyBoxes([a], id, a.page);
+    remove(a.id);
+  }
+  function duplicate(aid: string) {
+    const a = f.data?.anns.find((x) => x.id === aid);
+    if (a) putAnns(cloneAnns([a], a.page, 12, 12), a.page);
+  }
+  /** Paste copied boxes onto a page: at a point (right-click), or where they were copied from. */
+  function pasteHere(page = viewPage(), at?: { x: number; y: number }) {
+    let list = sizes.length ? takeClip(id, page) : null;
+    if (!list) return;
+    if (at) {
+      const b = bounds(list);
+      list = list.map((a) => shiftAnn(a, at.x - b.x, at.y - b.y));
+    }
+    putAnns(list, page);
+  }
+  async function addImageAt(src: string, page = viewPage(), at = viewPoint(page)) {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    // Screen pixels to points, and no wider than 200 pt or the page.
+    const w = Math.max(16, Math.min(200, img.width * 0.75, sizes[page].w - 24));
+    const h = (w * img.height) / img.width;
+    putAnns([{ id: uid(), page, type: "image", src, x: at.x - w / 2, y: at.y - h / 2, w, h }], page);
+  }
+  function addTextAt(text: string, page = viewPage(), at = viewPoint(page)) {
+    putAnns([{ id: uid(), page, type: "text", x: Math.max(24, at.x - 120), y: at.y, w: 0, h: 0, text, size: 12, font: "helv", color: "#000000" }], page);
+  }
+  function nudge(aid: string, dx: number, dy: number) {
+    const a = f.data?.anns.find((x) => x.id === aid);
+    if (!a) return;
+    const m = shiftAnn(a, dx, dy);
+    update(aid, { x: m.x, y: m.y, x2: m.x2, y2: m.y2 });
+  }
+  /** Stack order: later boxes are drawn on top. Steps only count boxes on the same page. */
+  function layer(aid: string, to: "front" | "back" | "up" | "down") {
+    mutate((d) => {
+      const list = [...d.anns];
+      const i = list.findIndex((a) => a.id === aid);
+      if (i < 0) return d;
+      const [a] = list.splice(i, 1);
+      let j = to === "front" ? list.length : to === "back" ? 0 : i;
+      if (to === "up") {
+        const k = list.findIndex((b, n) => n >= i && b.page === a.page);
+        j = k < 0 ? i : k + 1;
+      } else if (to === "down") {
+        const k = list.findLastIndex((b, n) => n < i && b.page === a.page);
+        j = k < 0 ? i : k;
+      }
+      list.splice(j, 0, a);
+      return { ...d, anns: list };
+    });
+  }
+  /** A box dropped on one of our pages: moved there from another page, or copied in from the other PDF. */
+  function dropAnn(page: number, drop: AnnDrop, at: { x: number; y: number }) {
+    const first = drop.anns[0];
+    const [dx, dy] = [at.x - first.x, at.y - first.y];
+    if (drop.file === id) {
+      const moved = new Set(drop.anns.map((a) => a.id));
+      mutate((d) => ({ ...d, anns: d.anns.map((a) => (moved.has(a.id) ? { ...shiftAnn(a, dx, dy), page } : a)) }));
+      setSelected(first.id);
+    } else {
+      putAnns(cloneAnns(drop.anns, page, dx, dy), page);
+      toast(`Copied into ${f.meta!.name || "this PDF"}.`);
+    }
+  }
+  /** A page dropped between our pages: moved within this PDF, or copied in from the other one with its boxes. */
+  function dropPage(drop: PageDrop) {
+    if (drop.file === id) {
+      const from = drop.page;
+      const to = drop.at > from ? drop.at - 1 : drop.at;
+      if (to !== from) pageOp("Moving page…", () => movePage(data.bytes, from, to), (anns) => anns.map((a) => ({ ...a, page: movedIndex(a.page, from, to) })));
+      return;
+    }
+    pageOp("Copying page…", () => insertPages(data.bytes, drop.bytes, drop.at, [drop.page]), (anns) => [
+      ...anns.map((a) => (a.page >= drop.at ? { ...a, page: a.page + 1 } : a)),
+      ...cloneAnns(drop.anns, drop.at),
+    ]);
+  }
+  onPageDrop.current = dropPage;
+  /** Files dropped on a page from the computer: pictures go where they land, PDFs are added after the page. */
+  async function dropFiles(page: number, files: File[], at: { x: number; y: number }) {
+    for (const file of files) {
+      try {
+        if (file.type.startsWith("image/")) await addImageAt(await imageToPng(file), page, at);
+        else if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+          const other = new Uint8Array(await file.arrayBuffer());
+          const n = await pageCount(other);
+          await pageOp("Adding pages…", () => insertPages(f.data!.bytes, other, page + 1), (anns) => anns.map((a) => (a.page > page ? { ...a, page: a.page + n } : a)));
+        }
+      } catch (e) {
+        toast(`Couldn’t add ${file.name}: ${errorText(e)}`, "error");
+      }
+    }
+  }
+  /** Drag a page by its grip: onto the other PDF to copy it there, or between pages here to move it. */
+  function dragPage(e: React.PointerEvent, i: number) {
+    e.preventDefault();
+    const wrapEl = (e.currentTarget as HTMLElement).closest(".page-wrap")!;
+    const src = wrapEl.querySelector("canvas");
+    const tw = 120;
+    const thumb = document.createElement("canvas");
+    thumb.className = "page-thumb";
+    thumb.width = tw * 2;
+    thumb.height = Math.round((tw * 2 * sizes[i].h) / sizes[i].w);
+    thumb.style.width = `${tw}px`;
+    try {
+      if (src?.width) thumb.getContext("2d")!.drawImage(src, 0, 0, thumb.width, thumb.height);
+    } catch {
+      // A blank card still shows where the page goes.
+    }
+    const g = ghost(thumb, { x: tw / 2, y: 16 }, false);
+    g.move(e.clientX, e.clientY);
+    const mark = marker();
+    let target: { el: HTMLElement; at: number } | null = null;
+    const move = (ev: PointerEvent) => {
+      g.move(ev.clientX, ev.clientY);
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      // Scroll the PDF under the pointer when near its top or bottom edge.
+      const sc = under?.closest<HTMLElement>(".pdf-scroll");
+      if (sc) {
+        const r = sc.getBoundingClientRect();
+        if (ev.clientY < r.top + 50) sc.scrollBy(0, -18);
+        else if (ev.clientY > r.bottom - 50) sc.scrollBy(0, 18);
+      }
+      const hit = under?.closest<HTMLElement>(".page-wrap");
+      target = null;
+      if (!hit) return mark(null);
+      const r = hit.getBoundingClientRect();
+      const after = ev.clientY > r.top + r.height / 2;
+      const at = Number(hit.dataset.index) + (after ? 1 : 0);
+      if (!root.current?.contains(hit) || (at !== i && at !== i + 1)) target = { el: hit, at };
+      mark(target ? hit : null, after ? "drop-after" : "drop-before");
+    };
+    const up = () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      g.remove();
+      mark(null);
+      const d = f.data;
+      if (target && d) target.el.closest(".pdf-scroll")?.dispatchEvent(new CustomEvent<PageDrop>(DROP_PAGE, { detail: { file: id, bytes: d.bytes, page: i, anns: d.anns.filter((a) => a.page === i), at: target.at } }));
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+  }
+
+  function ctxItems(): MenuEntry[] {
+    if (!ctx) return [];
+    const a = ctx.ann ? data.anns.find((x) => x.id === ctx.ann) : null;
+    const paste: MenuEntry = { label: a ? "Paste" : "Paste here", keys: "Ctrl+V", icon: <ClipboardPaste size={14} />, disabled: !hasClip(), run: () => pasteHere(ctx.page, a ? undefined : { x: ctx.x, y: ctx.y }) };
+    if (!a) {
+      const mark = (type: "check" | "cross") => add({ page: ctx.page, type, x: ctx.x - 8, y: ctx.y - 8, w: 16, h: 16, color: type === "check" ? "#1b5e20" : "#b71c1c" });
+      return [
+        paste,
+        "-",
+        { label: "Add text here", icon: <Type size={14} />, run: () => add({ page: ctx.page, type: "text", x: ctx.x, y: ctx.y - 8, w: 0, h: 0, text: "", size: 14, font: "helv", color: "#000000" }) },
+        { label: "Add tick here", icon: <Check size={14} />, run: () => mark("check") },
+        { label: "Add cross here", icon: <XIcon size={14} />, run: () => mark("cross") },
+        { label: "Add today’s date here", icon: <CalendarDays size={14} />, run: () => add({ page: ctx.page, type: "text", x: ctx.x, y: ctx.y - 8, w: 0, h: 0, text: new Date().toLocaleDateString(), size: 14, font: "helv", color: "#000000" }) },
+        "-",
+        { label: "Insert blank page after", icon: <FilePlus2 size={14} />, run: () => blankAfter(ctx.page) },
+      ];
+    }
+    return [
+      { label: "Cut", keys: "Ctrl+X", icon: <Scissors size={14} />, run: () => { copyBoxes([a], id, a.page); remove(a.id); } },
+      { label: "Copy", keys: "Ctrl+C", icon: <Copy size={14} />, run: () => copyBoxes([a], id, a.page) },
+      paste,
+      { label: "Duplicate", keys: "Ctrl+D", icon: <CopyPlus size={14} />, run: () => duplicate(a.id) },
+      "-",
+      { label: "Bring to front", icon: <BringToFront size={14} />, run: () => layer(a.id, "front") },
+      { label: "Bring forward", icon: <ArrowUp size={14} />, run: () => layer(a.id, "up") },
+      { label: "Send backward", icon: <ArrowDown size={14} />, run: () => layer(a.id, "down") },
+      { label: "Send to back", icon: <SendToBack size={14} />, run: () => layer(a.id, "back") },
+      "-",
+      { label: "Delete", keys: "Del", icon: <Trash2 size={14} />, run: () => remove(a.id) },
+    ];
   }
 
   /** Turn a line already on the page into editable text: hide it under white and type over it. */
@@ -626,7 +913,11 @@ export default function Pdf({ id }: { id: string }) {
           })()}
           {sel.type === "table" && <Thickness value={sel.thick ?? 1} min={0} zero="no lines" onChange={(t) => update(sel.id, { thick: t })} />}
           {penKeyOf(sel) && <ShapeStyle line={sel.type === "line"} value={{ ...sel, thick: sel.thick ?? (sel.type === "line" ? 1.5 : 2) }} onChange={(p) => styleShape(sel, p)} />}
-          <button onClick={() => add({ ...sel, x: sel.x + 12, y: sel.y + 12, x2: sel.x2 === undefined ? undefined : sel.x2 + 12, y2: sel.y2 === undefined ? undefined : sel.y2 + 12 })}>Duplicate</button>
+          <span className="psep" />
+          <button title="Copy (Ctrl C). Paste here or in the other PDF with Ctrl V." onClick={copySel}><Copy size={14} /> Copy</button>
+          <button title="Duplicate (Ctrl D)" onClick={() => duplicate(sel.id)}><CopyPlus size={14} /> Duplicate</button>
+          <button title="Bring to front" onClick={() => layer(sel.id, "front")}><BringToFront size={14} /></button>
+          <button title="Send to back" onClick={() => layer(sel.id, "back")}><SendToBack size={14} /></button>
           <button onClick={() => remove(sel.id)}>Delete</button>
         </div>
       )}
@@ -663,8 +954,9 @@ export default function Pdf({ id }: { id: string }) {
           {error && <div className="empty"><p>{error}</p></div>}
           {doc &&
             sizes.map((size, i) => (
-              <div key={`${i}-${sizes.length}`} className="page-wrap">
+              <div key={`${i}-${sizes.length}`} className="page-wrap" data-index={i}>
                 <div className="page-bar">
+                  <button className="icon page-grip" title={pane.split ? "Drag to move this page, or onto the other PDF to copy it there" : "Drag to move this page"} disabled={!!busy} onPointerDown={(e) => dragPage(e, i)}><GripVertical /></button>
                   <span>Page {i + 1} of {sizes.length}</span>
                   <span className="grow" />
                   <button className="icon" title="Move up" disabled={i === 0 || !!busy} onClick={() => swapPage(i, i - 1)}><ArrowUp /></button>
@@ -696,6 +988,10 @@ export default function Pdf({ id }: { id: string }) {
                   onEditRun={(run, all) => editRun(i, run, all)}
                   onCell={(aid, r, c) => setCell({ id: aid, r, c })}
                   focusText={focusText}
+                  file={id}
+                  onDropAnn={(drop, at) => dropAnn(i, drop, at)}
+                  onFiles={(files, at) => dropFiles(i, files, at)}
+                  onContext={(cx, cy, at, ann) => setCtx({ cx, cy, page: i, x: at.x, y: at.y, ann })}
                 />
               </div>
             ))}
@@ -724,6 +1020,7 @@ export default function Pdf({ id }: { id: string }) {
         )}
       </div>
 
+      {ctx && <ContextMenu x={ctx.cx} y={ctx.cy} items={ctxItems()} onClose={() => setCtx(null)} />}
       {sigFor && (
         <SignaturePad
           title={sigFor === "initials" ? "Add initials" : "Add signature"}
@@ -834,8 +1131,14 @@ function PageView(props: {
   onEditRun: (run: TextRun, all: TextRun[]) => void;
   onCell: (id: string, r: number, c: number) => void;
   focusText: string | null;
+  file: string;
+  onDropAnn: (drop: AnnDrop, at: { x: number; y: number }) => void;
+  onFiles: (files: File[], at: { x: number; y: number }) => void;
+  onContext: (cx: number, cy: number, at: { x: number; y: number }, ann: string | null) => void;
 }) {
   const { doc, index, size, scale, tool } = props;
+  const latest = useRef(props);
+  latest.current = props;
   const runs = useRef<TextRun[] | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -857,7 +1160,19 @@ function PageView(props: {
     // Pages far out of view give their pixels back, so long PDFs stay light at high resolution.
     const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { rootMargin: "1600px" });
     io.observe(wrap.current!);
-    return () => io.disconnect();
+    // A box dragged onto this page, from another page or from the PDF on the other side.
+    const el = wrap.current!;
+    const onDrop = (e: Event) => {
+      const d = (e as CustomEvent<AnnDrop>).detail;
+      const r = el.getBoundingClientRect();
+      const k = latest.current.scale;
+      latest.current.onDropAnn(d, { x: (d.clientX - r.left) / k - d.grab.x, y: (d.clientY - r.top) / k - d.grab.y });
+    };
+    el.addEventListener(DROP_ANN, onDrop);
+    return () => {
+      io.disconnect();
+      el.removeEventListener(DROP_ANN, onDrop);
+    };
   }, []);
 
   useEffect(() => {
@@ -904,7 +1219,7 @@ function PageView(props: {
     if (!visible && canvas.current) canvas.current.width = canvas.current.height = 0;
   }, [visible]);
 
-  const toPage = (e: React.PointerEvent) => {
+  const toPage = (e: { clientX: number; clientY: number }) => {
     const r = wrap.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
   };
@@ -914,6 +1229,27 @@ function PageView(props: {
       ref={wrap}
       className={"page" + (tool === "edit" ? " editing" : tool !== "select" ? " placing" : "")}
       style={{ width: size.w * scale, height: size.h * scale }}
+      data-index={index}
+      data-scale={scale}
+      onContextMenu={(e) => {
+        if (e.target !== e.currentTarget && e.target !== canvas.current) return;
+        e.preventDefault();
+        props.onContext(e.clientX, e.clientY, toPage(e), null);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        e.currentTarget.classList.add("drop-target");
+      }}
+      onDragLeave={(e) => e.currentTarget.classList.remove("drop-target")}
+      onDrop={(e) => {
+        e.currentTarget.classList.remove("drop-target");
+        const files = [...e.dataTransfer.files];
+        if (!files.length) return;
+        e.preventDefault();
+        props.onFiles(files, toPage(e));
+      }}
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget && e.target !== canvas.current) return;
         if (tool === "select") return props.onSelect(null);
@@ -1003,7 +1339,7 @@ function PageView(props: {
           />
         ))}
       {props.anns.map((a) => (
-        <AnnView key={a.id} a={a} scale={scale} focus={props.focusText === a.id} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} onCell={(r, c) => props.onCell(a.id, r, c)} />
+        <AnnView key={a.id} a={a} file={props.file} scale={scale} focus={props.focusText === a.id} selected={props.selected === a.id} onSelect={() => props.onSelect(a.id)} onChange={(p) => props.onChange(a.id, p)} onRemove={() => props.onRemove(a.id)} onCell={(r, c) => props.onCell(a.id, r, c)} onContext={(cx, cy) => props.onContext(cx, cy, { x: a.x, y: a.y }, a.id)} />
       ))}
     </div>
   );
@@ -1047,7 +1383,7 @@ const CURSOR: Record<Handle, string> = { n: "ns-resize", s: "ns-resize", e: "ew-
 
 const TEXT_EDGE = 6; // px of draggable border around a text box
 
-function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove, onCell }: { a: Ann; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void; onCell: (r: number, c: number) => void }) {
+function AnnView({ a, file, scale, focus, selected, onSelect, onChange, onRemove, onCell, onContext }: { a: Ann; file: string; scale: number; focus: boolean; selected: boolean; onSelect: () => void; onChange: (p: Partial<Ann>) => void; onRemove: () => void; onCell: (r: number, c: number) => void; onContext: (cx: number, cy: number) => void }) {
   const [live, setLive] = useState<Partial<Ann> | null>(null); // position/size while dragging
   const tableRef = useRef<HTMLDivElement>(null);
   // Rows grow to fit their text after any change (typing, bigger text, narrower columns), as in a word processor.
@@ -1108,9 +1444,34 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove, onCe
     const center = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
     const keepRatio = a.type === "image" || a.type === "check" || a.type === "cross";
     let last: Partial<Ann> = {};
+    // Moving can carry the box onto another page, or onto the PDF on the other side of the split view.
+    const annEl = (e.currentTarget as HTMLElement).closest<HTMLElement>(".ann")!;
+    const ownPage = annEl.closest<HTMLElement>(".page")!;
+    const pr = ownPage.getBoundingClientRect();
+    const grab = { x: (e.clientX - pr.left) / scale - a.x, y: (e.clientY - pr.top) / scale - a.y };
+    const grabPx = { x: e.clientX - pr.left - annEl.offsetLeft, y: e.clientY - pr.top - annEl.offsetTop };
+    const mark = marker();
+    let away: HTMLElement | null = null;
+    let g: ReturnType<typeof ghost> | null = null;
     const move = (ev: PointerEvent) => {
       const dx = (ev.clientX - start.x) / scale;
       const dy = (ev.clientY - start.y) / scale;
+      if (mode === "move") {
+        annEl.classList.add("dragging");
+        const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>(".page") ?? null;
+        away = hit && hit !== ownPage ? hit : null;
+        mark(away);
+        if (away) {
+          g ??= ghost(annEl, grabPx);
+          g.move(ev.clientX, ev.clientY, Number(away.dataset.scale || scale) / scale);
+          annEl.classList.add("leaving");
+          last = {};
+          return setLive(null);
+        }
+        g?.remove();
+        g = null;
+        annEl.classList.remove("leaving");
+      }
       if (a.type === "line") {
         const [x1, y1, x2, y2] = lineEnds(a);
         last = mode === "p1" ? { x: x1 + dx, y: y1 + dy, x2, y2 } : mode === "p2" ? { x: x1, y: y1, x2: x2 + dx, y2: y2 + dy } : { x: x1 + dx, y: y1 + dy, x2: x2 + dx, y2: y2 + dy };
@@ -1151,11 +1512,15 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove, onCe
       }
       setLive(last);
     };
-    const up = () => {
+    const up = (ev: PointerEvent) => {
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
       setLive(null);
-      if (Object.keys(last).length) onChange(last);
+      annEl.classList.remove("dragging", "leaving");
+      g?.remove();
+      mark(null);
+      if (away) away.dispatchEvent(new CustomEvent<AnnDrop>(DROP_ANN, { detail: { file, anns: [a], grab, clientX: ev.clientX, clientY: ev.clientY } }));
+      else if (Object.keys(last).length) onChange(last);
     };
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
@@ -1304,7 +1669,16 @@ function AnnView({ a, scale, focus, selected, onSelect, onChange, onRemove, onCe
     <div
       className={`ann ann-${a.type}` + (selected ? " sel" : "")}
       style={{ ...box, ...(a.type === "highlight" || a.type === "whiteout" ? { background: a.color } : {}) }}
-      onPointerDown={(e) => { if ((a.type === "text" || a.type === "table") && e.target !== e.currentTarget) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
+      onPointerDown={(e) => { if (e.button === 2 || ((a.type === "text" || a.type === "table") && e.target !== e.currentTarget)) return; e.preventDefault(); onSelect(); drag(e, "move"); }}
+      onContextMenu={(e) => {
+        // While typing in a box, the right-click menu is the usual one for text.
+        const typing = (e.target as HTMLElement).closest(".ann-text,.ann-cell");
+        if (typing && typing === document.activeElement) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onSelect();
+        onContext(e.clientX, e.clientY);
+      }}
     >
       {body}
       {selected && (
