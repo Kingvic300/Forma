@@ -1,13 +1,9 @@
 // Ask Groq to edit the open PDF. The model never touches the file: it answers with a short list of
 // operations (change a block of text, add a shape, move or delete something) that Pdf.tsx applies
 // as ordinary annotations, so one Ctrl+Z takes the whole answer back.
-import { getSetting, setSetting } from "../../lib/store";
+import { groqChat } from "../../lib/groq";
 
-const URL = "https://api.groq.com/openai/v1/chat/completions";
-export const GROQ_MODEL = "llama-3.3-70b-versatile";
-
-export const getGroqKey = () => getSetting<string>("groq-key");
-export const setGroqKey = (k: string) => setSetting("groq-key", k.trim());
+export { getGroqKey, setGroqKey } from "../../lib/groq";
 
 export type AiOp =
   | { op: "edit_text"; block: string; text: string }
@@ -34,32 +30,15 @@ Each op is one of:
 Rules: only edit what the user asked for. Keep the rest of a block's text unchanged when editing part of it. Use block ids exactly as given. If the request is a question or can't be done, return "ops": [] and explain in "reply". Never output anything outside the JSON object.`;
 
 export async function askAi(key: string, context: string, history: { role: "user" | "assistant"; content: string }[], request: string): Promise<AiReply> {
-  const res = await fetch(URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM },
-        ...history,
-        { role: "user", content: `Current PDF:\n${context}\n\nRequest: ${request}` },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    let msg = body;
-    try {
-      msg = JSON.parse(body).error?.message ?? body;
-    } catch {
-      // keep raw body
-    }
-    throw new Error(res.status === 401 ? "Groq rejected the API key." : `Groq error ${res.status}: ${msg.slice(0, 200)}`);
-  }
-  const json = await res.json();
-  const content: string = json.choices?.[0]?.message?.content ?? "";
+  const content = await groqChat(
+    key,
+    [
+      { role: "system", content: SYSTEM },
+      ...history,
+      { role: "user", content: `Current PDF:\n${context}\n\nRequest: ${request}` },
+    ],
+    { json: true, temperature: 0.1 },
+  );
   let parsed: Partial<AiReply>;
   try {
     parsed = JSON.parse(content);
