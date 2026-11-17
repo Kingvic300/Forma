@@ -5,7 +5,8 @@ import type ExcelJSType from "exceljs";
 import { Book, display, parseRange, rangeText } from "./formula";
 import { moveFormula } from "./refs";
 import { parseInput, toSerial } from "./format";
-import type { Border, CellFmt, CondRule, Sheet, SheetsData, Validation } from "./types";
+import type { Border, CellFmt, CondRule, Sheet, SheetTable, SheetsData, Validation } from "./types";
+import { dataRows, headerTexts, rewriteStructured, tableAt, totalCode } from "./tables";
 import { key } from "./types";
 
 type ExcelJS = typeof ExcelJSType;
@@ -213,6 +214,31 @@ export async function readXlsx(buf: ArrayBuffer): Promise<SheetsData> {
         }
       }
     }
+    // Tables.
+    for (const tb of Object.values((ws as unknown as { tables?: Record<string, { table?: Record<string, unknown>; model?: Record<string, unknown> }> }).tables ?? {})) {
+      const m = (tb.table ?? tb.model) as { name?: string; displayName?: string; tableRef?: string; ref?: string; totalsRow?: boolean; style?: { theme?: string | null; showRowStripes?: boolean; showColumnStripes?: boolean; showFirstColumn?: boolean; showLastColumn?: boolean } } | undefined;
+      const b = m && parseRange(m.tableRef ?? m.ref ?? "");
+      if (!m || !b) continue;
+      const t: SheetTable = { name: m.displayName || m.name || `Table${(s.tables?.length ?? 0) + 1}`, ...b, style: m.style?.theme ?? "", totals: !!m.totalsRow || undefined };
+      if (m.style?.showRowStripes === false) t.bandRows = false;
+      if (m.style?.showColumnStripes) t.bandCols = true;
+      if (m.style?.showFirstColumn) t.firstCol = true;
+      if (m.style?.showLastColumn) t.lastCol = true;
+      (s.tables ??= []).push(t);
+    }
+    // Excel stores [@Col] as Table[[#This Row],[Col]]; show the short form inside the table.
+    if (s.tables?.length)
+      s.cells = s.cells.map((row, r) => row.map((v, c) => {
+        if (!v.startsWith("=")) return v;
+        const here = tableAt(s, r, c);
+        return rewriteStructured(v, (table, spec) => {
+          const m = /^\s*\[#This Row\]\s*,\s*(\[.*\])\s*$/i.exec(spec);
+          if (!m) return null;
+          const col = m[1].slice(1, -1);
+          const short = /^[\w.]+$/.test(col) ? `@${col}` : `@[${col}]`;
+          return here && here.name.toUpperCase() === table.toUpperCase() ? `[${short}]` : `${table}[${short}]`;
+        });
+      }));
     sheets.push(s);
   });
 
@@ -250,7 +276,7 @@ export async function writeXlsx(data: SheetsData): Promise<Uint8Array> {
       if (raw.startsWith("=")) {
         const result = book.value(si, r, c);
         const res = typeof result === "object" ? { error: display(result) } : result;
-        cell.value = { formula: raw.slice(1), result: res } as never;
+        cell.value = { formula: toFileFormula(s, raw, r, c).slice(1), result: res } as never;
       } else if (raw) {
         if (raw[0] === "'") cell.value = raw.slice(1);
         else {
@@ -298,6 +324,36 @@ export async function writeXlsx(data: SheetsData): Promise<Uint8Array> {
     for (const k of Object.keys(s.notes ?? {})) {
       const [r, c] = k.split(",").map(Number);
       if (!s.cells[r]?.[c] && !fmtKeys.has(k)) write(r, c);
+    }
+    for (const t of s.tables ?? []) {
+      const heads = headerTexts(s, t);
+      const { d1, d2 } = dataRows(t);
+      const FN: Record<number, string> = { 109: "sum", 101: "average", 103: "count", 102: "countNums", 104: "max", 105: "min", 107: "stdDev", 110: "var" };
+      const columns = heads.map((name, j) => {
+        const col: Record<string, unknown> = { name, filterButton: t.filter !== false };
+        if (!t.totals) return col;
+        const tr = s.cells[t.r2]?.[t.c1 + j] ?? "";
+        if (j === 0 && !tr.startsWith("=")) col.totalsRowLabel = tr || "Total";
+        else if (FN[totalCode(tr)] && /^=SUBTOTAL\(\d+,[^,()]+\[[^\]]*\]\)$/i.test(tr)) col.totalsRowFunction = FN[totalCode(tr)];
+        else if (tr.startsWith("=")) Object.assign(col, { totalsRowFunction: "custom", totalsRowFormula: toFileFormula(s, tr, t.r2, t.c1 + j).slice(1) });
+        else col.totalsRowFunction = "none";
+        return col;
+      });
+      const rows = Array.from({ length: d2 - d1 + 1 }, (_, i) => heads.map((_, j) => ws.getCell(d1 + i + 1, t.c1 + j + 1).value));
+      try {
+        ws.addTable({
+          name: t.name,
+          displayName: t.name,
+          ref: rangeText(t.r1, t.c1, t.r1, t.c1),
+          headerRow: t.header !== false,
+          totalsRow: !!t.totals,
+          style: { theme: (t.style === "" ? null : t.style ?? "TableStyleMedium2") as never, showRowStripes: t.bandRows !== false, showColumnStripes: !!t.bandCols, showFirstColumn: !!t.firstCol, showLastColumn: !!t.lastCol },
+          columns,
+          rows,
+        } as never);
+      } catch {
+        // A table ExcelJS can't describe; its cells are already written.
+      }
     }
     for (const m of s.merges ?? []) {
       try {
@@ -355,6 +411,21 @@ export async function writeXlsx(data: SheetsData): Promise<Uint8Array> {
   }
   const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out as ArrayBuffer);
+}
+
+/** Formulas as Excel stores them: [@Col] becomes Table[[#This Row],[Col]]. */
+function toFileFormula(s: Sheet, formula: string, r: number, c: number) {
+  if (!formula.includes("[")) return formula;
+  return rewriteStructured(formula, (table, spec) => {
+    const name = table || tableAt(s, r, c)?.name || table;
+    const t = spec.trim();
+    if (t.startsWith("@")) {
+      const rest = t.slice(1).trim();
+      const col = rest.startsWith("[") ? rest : `[${rest}]`;
+      return `${name}[${rest ? `[#This Row],${col}` : "#This Row"}]`;
+    }
+    return table ? null : `${name}[${spec}]`;
+  });
 }
 
 /** The format implied by how a value was typed ("12%", "$1,200", "2024-05-01"). */
