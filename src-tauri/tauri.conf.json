@@ -45,8 +45,8 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Docs, Sheets, Forms, PDF and Tracker in one offline app",
-    "longDescription": "Forma is an offline desktop office suite. Write documents, open and edit CSV and Excel spreadsheets, build forms and collect responses, edit, fill and sign PDFs, and track tasks and habits. Your files stay on your computer.",
+    "shortDescription": "Docs, Sheets, Slides, Forms, PDF and Tracker in one offline app",
+    "longDescription": "Forma is an offline desktop office suite. Write documents, open and edit CSV and Excel spreadsheets, open, edit and present PowerPoint slides with their animations, build forms and collect responses, edit, fill and sign PDFs, and track tasks and habits. Your files stay on your computer.",
     "license": "MIT",
     "copyright": "Copyright (c) Forma contributors",
     "icon": [
@@ -63,7 +63,9 @@
       { "ext": ["xlsx"], "name": "Excel workbook", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
       { "ext": ["xls"], "name": "Excel 97-2003 workbook", "role": "Editor", "mimeType": "application/vnd.ms-excel" },
       { "ext": ["ods"], "name": "OpenDocument spreadsheet", "role": "Editor", "mimeType": "application/vnd.oasis.opendocument.spreadsheet" },
-      { "ext": ["docx"], "name": "Word document", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }
+      { "ext": ["docx"], "name": "Word document", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+      { "ext": ["pptx"], "name": "PowerPoint presentation", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+      { "ext": ["ppsx"], "name": "PowerPoint slide show", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.slideshow" }
     ],
     "linux": {
       "deb": {

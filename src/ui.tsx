@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, CircleCheckBig, Columns2, FileSignature, FileText, Folder, ListChecks, Loader2, Sheet, X } from "lucide-react";
+import { Check, ChevronDown, CircleCheckBig, Columns2, FileSignature, FileText, Folder, ListChecks, Loader2, Presentation, Sheet, X } from "lucide-react";
 import { APPS, go, NAV_APPS, type AppId } from "./lib/route";
 import type { Meta } from "./lib/store";
 
@@ -20,6 +20,7 @@ export const APP_COLOR: Record<AppId, string> = {
   drive: "#8d97ab",
   docs: "#7c9dff",
   sheets: "#4fbf8b",
+  slides: "#ef8f4f",
   forms: "#b195f5",
   pdf: "#f07a80",
   tracker: "#e2b25b",
@@ -29,6 +30,7 @@ const APP_GLYPH: Record<AppId, typeof FileText> = {
   drive: Folder,
   docs: FileText,
   sheets: Sheet,
+  slides: Presentation,
   forms: ListChecks,
   pdf: FileSignature,
   tracker: CircleCheckBig,

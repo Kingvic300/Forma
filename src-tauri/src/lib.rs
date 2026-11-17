@@ -16,7 +16,7 @@ struct OpenedFile {
 }
 
 const EXTENSIONS: &[&str] = &[
-    "pdf", "csv", "tsv", "xlsx", "xls", "ods", "docx", "html", "htm", "txt", "md", "json",
+    "pdf", "csv", "tsv", "xlsx", "xls", "ods", "docx", "pptx", "ppsx", "potx", "pptm", "html", "htm", "txt", "md", "json",
 ];
 
 fn file_args<I: IntoIterator<Item = String>>(args: I) -> Vec<PathBuf> {

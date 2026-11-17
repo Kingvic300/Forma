@@ -16,6 +16,7 @@ import pkg from "../package.json";
 
 const Docs = lazy(() => import("./apps/Docs"));
 const Sheets = lazy(() => import("./apps/sheets/Sheets"));
+const Slides = lazy(() => import("./apps/slides/Slides"));
 const Forms = lazy(() => import("./apps/forms/Forms"));
 const Pdf = lazy(() => import("./apps/pdf/Pdf"));
 const Tracker = lazy(() => import("./apps/Tracker"));
@@ -217,6 +218,8 @@ function Editor({ app, id }: { app: AppId; id: string }) {
       return <Docs key={id} id={id} />;
     case "sheets":
       return <Sheets key={id} id={id} />;
+    case "slides":
+      return <Slides key={id} id={id} />;
     case "forms":
       return <Forms key={id} id={id} />;
     case "pdf":
@@ -456,7 +459,7 @@ function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<
         <Logo size={40} />
         <div>
           <div className="about-name">Forma {pkg.version}</div>
-          <div className="muted">Docs, Sheets, Forms, PDF and Tracker. Your files never leave this computer.</div>
+          <div className="muted">Docs, Sheets, Slides, PDF and Tracker. Your files never leave this computer.</div>
         </div>
       </div>
       <section className="setting">

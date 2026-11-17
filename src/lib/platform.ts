@@ -13,6 +13,7 @@ const MIME: Record<string, string> = {
   json: "application/json",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   png: "image/png",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   zip: "application/zip",
 };
 
@@ -75,4 +76,19 @@ export async function onFilesOpened(cb: () => void) {
   if (!isTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen("files-opened", cb);
+}
+
+/** Enter or leave full screen. Resolves to whether the window was full screen before. */
+export async function setFullscreen(on: boolean): Promise<boolean> {
+  if (isTauri) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const w = getCurrentWindow();
+    const was = await w.isFullscreen();
+    if (was !== on) await w.setFullscreen(on);
+    return was;
+  }
+  const was = !!document.fullscreenElement;
+  if (on && !was) await document.documentElement.requestFullscreen().catch(() => {});
+  else if (!on && was) await document.exitFullscreen().catch(() => {});
+  return was;
 }

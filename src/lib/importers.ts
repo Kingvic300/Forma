@@ -6,14 +6,16 @@ import type { Sheet, SheetsData } from "../apps/sheets/types";
 import type { DocsData } from "../apps/Docs";
 import type { FormData } from "../apps/forms/types";
 import type { PdfData } from "../apps/pdf/types";
+import { emptyDeck } from "../apps/slides/types";
 
 export const ACCEPT: Record<Kind | "all", string> = {
   docs: ".docx,.html,.htm,.txt,.md",
   sheets: ".csv,.tsv,.xlsx,.xls,.ods",
+  slides: ".pptx,.ppsx,.potx,.pptm",
   forms: ".json",
   pdf: ".pdf",
   tracker: ".json",
-  all: ".pdf,.csv,.tsv,.xlsx,.xls,.ods,.docx,.html,.htm,.txt,.md,.json",
+  all: ".pdf,.csv,.tsv,.xlsx,.xls,.ods,.docx,.pptx,.ppsx,.potx,.pptm,.html,.htm,.txt,.md,.json",
 };
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -33,6 +35,8 @@ export function blank(kind: Kind): unknown {
       return { html: "<p><br></p>" } satisfies DocsData;
     case "sheets":
       return { sheets: [{ name: "Sheet1", cells: [] }] } satisfies SheetsData;
+    case "slides":
+      return emptyDeck();
     case "forms":
       return {
         title: "Untitled form",
@@ -83,6 +87,11 @@ export async function importFile(file: File): Promise<{ kind: Kind; id: string }
     const sheets = await workbookToSheets(await file.arrayBuffer());
     return { kind: "sheets", id: await createFile("sheets", name, { sheets } satisfies SheetsData) };
   }
+  if (ext === "pptx" || ext === "ppsx" || ext === "potx" || ext === "pptm") {
+    const { importPptx } = await import("../apps/slides/importPptx");
+    return { kind: "slides", id: await createFile("slides", name, await importPptx(await file.arrayBuffer())) };
+  }
+  if (ext === "ppt") throw new Error("Old PowerPoint files (.ppt) can’t be opened. Save it as .pptx in PowerPoint or LibreOffice first");
   if (ext === "docx") {
     const mammoth = await import("mammoth");
     const res = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });

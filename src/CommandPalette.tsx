@@ -11,6 +11,7 @@ type Item = { id: string; group: string; title: string; hint?: string; icon: Rea
 const NEW: [Kind, string, string][] = [
   ["docs", "New document", "Untitled document"],
   ["sheets", "New spreadsheet", "Untitled spreadsheet"],
+  ["slides", "New presentation", "Untitled presentation"],
   ["tracker", "New tracker", "My tracker"],
 ];
 
@@ -50,7 +51,7 @@ export function CommandPalette({ open, setOpen, current, onOpenFile, onSettings,
     NEW.filter(([, label]) => match(label)).forEach(([kind, label, name]) =>
       out.push({ id: "new-" + kind, group: "Create", title: label, icon: <FilePlus2 />, run: async () => go(`/${kind}/${await createFile(kind, name, blank(kind))}`) }),
     );
-    if (match("Open a file from your computer pdf csv excel word")) out.push({ id: "open", group: "Create", title: "Open a file from your computer…", hint: "PDF, CSV, Excel, Word", icon: <FolderOpen />, run: onOpenFile });
+    if (match("Open a file from your computer pdf csv excel word powerpoint pptx")) out.push({ id: "open", group: "Create", title: "Open a file from your computer…", hint: "PDF, CSV, Excel, Word, PowerPoint", icon: <FolderOpen />, run: onOpenFile });
     NAV_APPS.filter((a) => match(a.name) || match("go to " + a.name)).forEach((a) =>
       out.push({ id: "go-" + a.id, group: "Go to", title: a.name, hint: a.blurb, icon: <AppIcon app={a.id} size={22} />, keys: `Ctrl ${NAV_APPS.indexOf(a) + 1}`, run: () => switchTo(a.id, current) }),
     );

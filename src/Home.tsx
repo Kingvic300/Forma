@@ -9,15 +9,17 @@ import { AppIcon, Menu, timeAgo } from "./ui";
 const NEW: Record<Kind, { label: string; name: string }> = {
   docs: { label: "New document", name: "Untitled document" },
   sheets: { label: "New spreadsheet", name: "Untitled spreadsheet" },
+  slides: { label: "New presentation", name: "Untitled presentation" },
   forms: { label: "New form", name: "Untitled form" },
   tracker: { label: "New tracker", name: "My tracker" },
   pdf: { label: "New blank PDF", name: "Untitled PDF" },
 };
-const KIND_NAME: Record<Kind, string> = { docs: "Document", sheets: "Spreadsheet", forms: "Form", pdf: "PDF", tracker: "Tracker" };
+const KIND_NAME: Record<Kind, string> = { docs: "Document", sheets: "Spreadsheet", slides: "Presentation", forms: "Form", pdf: "PDF", tracker: "Tracker" };
 const EMPTY: Record<AppId, [string, string]> = {
-  drive: ["Nothing here yet", "Create a document, spreadsheet or tracker, or open a file from your computer. PDF, CSV, Excel and Word files all work."],
+  drive: ["Nothing here yet", "Create a document, spreadsheet, presentation or tracker, or open a file from your computer. PDF, CSV, Excel, Word and PowerPoint files all work."],
   docs: ["No documents yet", "Start a blank document, or open a Word, HTML, text or Markdown file to keep editing it here."],
   sheets: ["No spreadsheets yet", "Start a blank spreadsheet, or open a CSV or Excel file. Formulas like =SUM(A1:A9) work as you’d expect."],
+  slides: ["No presentations yet", "Start a blank presentation, or open a PowerPoint (.pptx) file to edit it and present it with its animations."],
   forms: ["No forms yet", "Build a form, fill it in on this computer, and see the responses as charts or in a spreadsheet."],
   pdf: ["No PDFs yet", "Open a PDF to add text, fill its fields, sign it, or merge and reorder pages. Or start a blank one and write on it."],
   tracker: ["No trackers yet", "Keep a list of tasks, tick off daily habits, and write a short note about each day."],
@@ -44,7 +46,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
   }
 
   const shown = (files ?? []).filter((f) => f.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const creatable: Kind[] = kind ? [kind] : ["docs", "sheets", "pdf", "tracker"];
+  const creatable: Kind[] = kind ? [kind] : ["docs", "sheets", "slides", "pdf", "tracker"];
 
   return (
     <div
@@ -61,7 +63,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
           <input className="filter" type="search" placeholder="Filter by name" aria-label="Filter files by name" value={query} onChange={(e) => setQuery(e.target.value)} />
         )}
         <button onClick={onOpenFile}>
-          <Upload /> {kind === "pdf" ? "Open a PDF" : "Open file"}
+          <Upload /> {kind === "pdf" ? "Open a PDF" : kind === "slides" ? "Open PowerPoint" : "Open file"}
         </button>
         {creatable.length === 1 && (
           <button className="primary" onClick={() => create(creatable[0])}>
@@ -155,7 +157,7 @@ export default function Home({ app, onOpenFile, onDropFiles }: { app: AppId; onO
           <div>
             <Upload />
             <strong>Drop to open in Forma</strong>
-            <span>PDF, CSV, Excel, Word, HTML, text and form files</span>
+            <span>PDF, CSV, Excel, Word, PowerPoint, HTML, text and form files</span>
           </div>
         </div>
       )}

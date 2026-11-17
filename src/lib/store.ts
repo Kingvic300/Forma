@@ -5,7 +5,7 @@ import { createStore, del, get, getMany, keys, set } from "idb-keyval";
 
 const db = createStore("forma-db", "files");
 
-export type Kind = "docs" | "sheets" | "forms" | "pdf" | "tracker";
+export type Kind = "docs" | "sheets" | "slides" | "forms" | "pdf" | "tracker";
 
 export interface Meta {
   id: string;

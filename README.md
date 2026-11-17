@@ -16,9 +16,23 @@ search every file across all apps.
 | **Files** | Everything you've made or opened, in one place. |
 | **Docs** | Rich-text documents with headings, fonts, colors, lists, tables, images and find & replace. Opens `.docx`, `.html`, `.txt` and `.md`. Exports Word (`.doc`), HTML, text, or PDF through the print dialog. |
 | **Sheets** | Spreadsheets with formulas (`SUM`, `AVERAGE`, `IF`, `COUNTIF`, `SUMIF`, `ROUND`, text functions and more), multiple tabs, sort, filter, copy/paste and undo. Opens `.csv`, `.tsv`, `.xlsx`, `.xls` and `.ods`. Exports `.csv` and `.xlsx`. |
+| **Slides** | Presentations. Opens PowerPoint files (`.pptx`, `.ppsx`, `.potx`) with their layouts, themes, text formatting, bullets, shapes, pictures, video, tables, charts, SmartArt, speaker notes, slide transitions and animations, and saves back to `.pptx`. Edit text and shapes on the slide, add entrance, emphasis, exit and motion-path effects, and present full screen. See below. |
 | **Forms** | Build a form, fill it in, and collect answers. Optionally share it by link. |
 | **PDF** | Edit text already printed on a page, or add text, dates, ticks, images, signatures and initials. Draw lines, boxes and highlights. Fill form fields, merge PDFs, and reorder, insert or delete pages. See below. |
 | **Tracker** | Tasks with due dates and priority, daily habits with streaks, and a daily note. |
+
+### Slides
+
+- **Present.** `F5` starts from the first slide, `Shift+F5` from the current one. Click, `→`,
+  `Space` or `PageDown` plays the next animation or slide; `←` goes back. `B` or `W` blanks the
+  screen, a slide number then `Enter` jumps to it, `Esc` ends the show.
+- **Animations.** Effects from PowerPoint play the way PowerPoint defines them: fades, wipes,
+  fly-ins, zooms, spins, motion paths, paragraph-by-paragraph builds, "with previous" and "after
+  previous" timing, and slides that move on by themselves. Open **Animations** to add, reorder or
+  time effects and to pick a slide transition.
+- **Saving.** Download as `.pptx`. Animations and transitions from an opened file are written back
+  unchanged. Gradient fills are saved as a solid color and some rarer PowerPoint effects are shown
+  as the closest match. Old `.ppt` files need to be saved as `.pptx` first.
 
 ### PDF editor
 
