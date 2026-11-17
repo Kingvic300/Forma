@@ -29,9 +29,8 @@ These items don't fit Forma, so they're not on the list:
 
 ## Sheets
 
-Done: **Sheets core** (v0.1.19) and **Tables and PivotTables** (next release).
-Next batches, in order: **Charts** (more types, axis titles, trendlines, sparklines) →
-**Analysis and formula checks** (goal seek, data tables, statistics, trace precedents, error checking,
+Done: **Sheets core** (v0.1.19), **Tables and PivotTables** (v0.1.20) and **Charts** (next release).
+Next batches, in order: **Analysis and formula checks** (goal seek, data tables, statistics, trace precedents, error checking,
 evaluate formula) → **Protection, templates, page setup, comments, grouping and outlines**.
 
 - **Workbook:** ✅ new, open, save (automatic), rename, duplicate, delete, recent files, import, export, multiple workbooks side by side. Planned: templates, workbook properties, read-only mode, compare workbooks, password protection and encryption, version history.
@@ -47,7 +46,7 @@ evaluate formula) → **Protection, templates, page setup, comments, grouping an
 - **Data validation:** ✅ whole number, decimal, list (dropdowns, from a range), date, text length and formula rules, reject or warn, error messages. Planned: dependent dropdowns, input messages, circle invalid data.
 - **Conditional formatting:** ✅ greater/less/between/equal, text contains, begins and ends with, blanks, duplicates and unique values, top and bottom N or %, above and below average, two- and three-color scales, data bars, formula rules, rule manager with priority and stop-if-true. Planned: date rules, icon sets.
 - **Tables:** ✅ format as table (Ctrl+T), header and total rows (sum, average, count, max, min and more), banded rows and columns, first and last column, 35 table styles, filter buttons, calculated columns, structured references (Table[Col], [@Col], [#Totals] and the rest), automatic expansion, rename, resize, convert to range, .xlsx import and export.
-- **Charts:** ✅ column, bar, line, area (clustered, stacked and 100%), pie, doughnut, scatter; titles, legends, data labels. Planned: bubble, radar, histogram, Pareto, box and whisker, waterfall, funnel, treemap, sunburst, combo and dual-axis, sparklines, axis titles, gridlines, trendlines, error bars, colors and styles.
+- **Charts:** ✅ column, bar, line, area (clustered, stacked and 100%), pie, doughnut, combo with a secondary axis, scatter, bubble, radar, histogram, Pareto, box and whisker, waterfall, funnel, treemap, sparklines (line, column, win/loss); titles, axis titles, legend position, data labels, gridlines, axis bounds and log scale, smooth lines and markers, trendlines (linear, exponential, logarithmic, power, polynomial, moving average) with equation and R², error bars (fixed, percent, standard deviation, standard error), color palettes, series by row or column. Planned: sunburst, map charts, per-point colors, charts in .xlsx files.
 - **Pivot tables:** ✅ create from a range or table, rows, columns, values and filters, sum, count, count numbers, average, min, max, distinct count, product, standard deviation, variance, grouping (dates by year, quarter, month or day; numbers into ranges), show values as % of grand, row or column total or as a running total, subtotals and grand totals, sort by label or value, refresh. Planned: slicers, pivot charts, GETPIVOTDATA.
 - **Analysis:** Planned: descriptive statistics, histogram, correlation, regression, moving averages, sampling, t-test, goal seek, scenarios, one- and two-variable data tables, forecast sheet.
 - **Data cleaning:** ✅ remove duplicates, trim spaces, split text to columns, text case. Planned: remove blank rows, convert text to numbers and dates.
