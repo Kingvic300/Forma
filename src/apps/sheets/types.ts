@@ -73,21 +73,64 @@ export interface Validation {
   message?: string;
 }
 
+export type ChartKind =
+  | "column" | "bar" | "line" | "area" | "pie" | "doughnut" | "scatter" | "bubble" | "radar"
+  | "histogram" | "pareto" | "box" | "waterfall" | "funnel" | "treemap" | "combo";
+export type Trendline = "linear" | "exp" | "log" | "power" | "poly2" | "poly3" | "movingAvg";
+
 export interface SheetChart {
   id: string;
   /** Data range, e.g. "A1:C8"; first row and column are labels. */
   range: string;
-  kind: "column" | "bar" | "line" | "area" | "pie" | "doughnut" | "scatter";
+  kind: ChartKind;
   stacked?: boolean;
   percent?: boolean;
   title?: string;
+  /** Legend shown (old files); `legendPos` says where. */
   legend?: boolean;
+  legendPos?: "b" | "t" | "r" | "l";
   labels?: boolean;
+  /** Series run along rows instead of down columns. */
+  byRow?: boolean;
+  xTitle?: string;
+  yTitle?: string;
+  y2Title?: string;
+  /** Horizontal gridlines (default on). */
+  gridlines?: boolean;
+  /** Line and area: smooth curves; markers on points. */
+  smooth?: boolean;
+  markers?: boolean;
+  /** Value axis bounds and log scale. */
+  min?: number;
+  max?: number;
+  log?: boolean;
+  trendline?: Trendline;
+  /** Polynomial order or moving-average period. */
+  trendOrder?: number;
+  trendEquation?: boolean;
+  trendR2?: boolean;
+  errorBars?: { type: "fixed" | "percent" | "stdev" | "stderr"; value: number };
+  /** Colour palette name (see PALETTES). */
+  palette?: string;
+  /** Combo charts: how each series is drawn, and which go on the secondary axis. */
+  seriesKinds?: Record<number, "column" | "line" | "area">;
+  secondary?: number[];
+  /** Histogram: number of bins (automatic when unset). */
+  bins?: number;
   /** Position and size in px, relative to the grid's top-left cell. */
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+/** A tiny chart drawn inside one cell, from a row or column of numbers. */
+export interface Sparkline {
+  range: string;
+  kind: "line" | "column" | "winloss";
+  color?: string;
+  /** Mark the highest and lowest points. */
+  highLow?: boolean;
 }
 
 /** An Excel table: a named range with a header row, optional total row and a style. */
@@ -165,6 +208,8 @@ export interface Sheet {
   showGrid?: boolean;
   tables?: SheetTable[];
   pivots?: Pivot[];
+  /** Sparklines keyed "row,col". */
+  sparklines?: Record<string, Sparkline>;
 }
 
 export interface SheetsData {
