@@ -90,6 +90,58 @@ export interface SheetChart {
   h: number;
 }
 
+/** An Excel table: a named range with a header row, optional total row and a style. */
+export interface SheetTable {
+  /** Name used in formulas: =SUM(Sales[Amount]). */
+  name: string;
+  /** Whole table, header and total rows included (0-based, inclusive). */
+  r1: number;
+  c1: number;
+  r2: number;
+  c2: number;
+  /** Excel style name, e.g. "TableStyleMedium2"; "" for no style. */
+  style?: string;
+  /** False when the table has no header row. */
+  header?: boolean;
+  /** The last row is a total row. */
+  totals?: boolean;
+  /** Banded rows default on; the rest default off. */
+  bandRows?: boolean;
+  bandCols?: boolean;
+  firstCol?: boolean;
+  lastCol?: boolean;
+  /** Filter buttons in the header row (default on). */
+  filter?: boolean;
+}
+
+export type PivotFn = "sum" | "count" | "countNums" | "average" | "min" | "max" | "distinct" | "product" | "stdev" | "var";
+export type PivotShow = "none" | "pctTotal" | "pctRow" | "pctCol" | "running";
+export type PivotGroup = "year" | "quarter" | "month" | "day" | number;
+
+/** A pivot table: its definition, and where its output is written on the sheet that holds it. */
+export interface Pivot {
+  id: string;
+  name: string;
+  /** A table name, or a range such as "Sheet1!$A$1:$D$40" whose first row names the fields. */
+  source: string;
+  /** Top-left cell of the output. */
+  r: number;
+  c: number;
+  rows: string[];
+  cols: string[];
+  values: { field: string; fn: PivotFn; show?: PivotShow }[];
+  filters: { field: string; hidden: string[] }[];
+  /** Dates grouped by period, numbers into bins of this size. */
+  group?: Record<string, PivotGroup>;
+  /** Subtotal rows for outer row fields (default on). */
+  subtotals?: boolean;
+  grandRows?: boolean;
+  grandCols?: boolean;
+  sort?: "asc" | "desc" | "valueDesc" | "valueAsc";
+  /** Size of the output last written, so a refresh can clear it. */
+  size?: { rows: number; cols: number };
+}
+
 export interface Sheet {
   name: string;
   cells: string[][];
@@ -111,6 +163,8 @@ export interface Sheet {
   tabColor?: string;
   hidden?: boolean;
   showGrid?: boolean;
+  tables?: SheetTable[];
+  pivots?: Pivot[];
 }
 
 export interface SheetsData {

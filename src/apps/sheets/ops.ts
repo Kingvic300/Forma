@@ -5,6 +5,7 @@ import { moveFormula, renameSheetInFormula, shiftFormula } from "./refs";
 import { parseDate, toSerial, fromSerial } from "./format";
 import type { CellFmt, Sheet, SheetsData } from "./types";
 import { key } from "./types";
+import { shiftTables } from "./tables";
 
 export const cloneSheet = (s: Sheet): Sheet => structuredClone(s);
 
@@ -52,7 +53,9 @@ export function shiftAxis(data: SheetsData, si: number, axis: "row" | "col", at:
   const sheets = data.sheets.map((s, i) => {
     // Formulas everywhere follow the moved cells.
     const cells = s.cells.map((row) => row?.map((v) => (v?.startsWith("=") ? shiftFormula(v, s.name, target, axis, at, count) : v)) ?? []);
-    if (i !== si) return { ...s, cells };
+    // Pivot sources given as ranges follow too.
+    const pivots = s.pivots?.map((p) => (/^[A-Za-z_\\][\w.]*$/.test(p.source) ? p : { ...p, source: shiftFormula("=" + p.source, s.name, target, axis, at, count).slice(1) }));
+    if (i !== si) return { ...s, cells, ...(pivots ? { pivots } : {}) };
     const n: Sheet = { ...s };
     if (axis === "row") {
       const out: string[][] = [];
@@ -91,6 +94,9 @@ export function shiftAxis(data: SheetsData, si: number, axis: "row" | "col", at:
     n.cond = s.cond?.map((r) => ({ ...r, range: remapRangeText(r.range, axis, at, count) ?? "" })).filter((r) => r.range);
     n.valid = s.valid?.map((r) => ({ ...r, range: remapRangeText(r.range, axis, at, count) ?? "" })).filter((r) => r.range);
     n.charts = s.charts?.map((ch) => ({ ...ch, range: remapRangeText(ch.range, axis, at, count) ?? ch.range }));
+    const moved = shiftTables({ ...s, pivots }, axis, at, count);
+    if (s.tables) n.tables = moved.tables;
+    if (s.pivots) n.pivots = moved.pivots;
     return n;
   });
   return { ...data, sheets };
@@ -104,6 +110,7 @@ export function renameSheet(data: SheetsData, si: number, name: string): SheetsD
       ...s,
       name: i === si ? name : s.name,
       cells: s.cells.map((row) => row?.map((v) => (v?.startsWith("=") ? renameSheetInFormula(v, old, name) : v)) ?? []),
+      ...(s.pivots ? { pivots: s.pivots.map((p) => ({ ...p, source: renameSheetInFormula("=" + p.source, old, name).slice(1) })) } : {}),
     })),
     names: data.names && Object.fromEntries(Object.entries(data.names).map(([k, v]) => [k, renameSheetInFormula("=" + v, old, name).slice(1)])),
   };
