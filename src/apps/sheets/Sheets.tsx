@@ -24,7 +24,10 @@ import { checkValid, listItems, makeCondEval, validationAt } from "./rules";
 import { cellText, formatOf } from "./view";
 import { sheetHtml, printHtml } from "./print";
 import { BorderMenu, ChartDialog, ColorMenu, CondDialog, FindBar, FunctionPicker, FUNCTION_NAMES, NamesDialog, SIGNATURES, SortDialog, ValidDialog, type BorderKind, type FindOpts } from "./parts";
-import type { Border, CellFmt, Sheet, SheetChart, SheetsData } from "./types";
+import { afterEdit, badTableName, convertToRange, createTable, dataRows, renameTable, resizeTable, setTotals, tableAt, tableLook, totalFormula, headerTexts, TOTAL_FNS } from "./tables";
+import { pivotAt, pivotItems, readSource, refreshPivot } from "./pivot";
+import { CreatePivotDialog, CreateTableDialog, PivotPanel, TableDesign } from "./tableui";
+import type { Border, CellFmt, Pivot, Sheet, SheetChart, SheetsData } from "./types";
 import { key } from "./types";
 
 const ROW_H = 24;
@@ -69,10 +72,12 @@ export default function Sheets({ id }: { id: string }) {
   const [find, setFind] = useState<{ replace: boolean } | null>(null);
   const [findCount, setFindCount] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; kind: "cell" | "row" | "col" | "tab"; tab?: number } | null>(null);
-  const [dialog, setDialog] = useState<null | "cond" | "valid" | "sort" | "names" | "fx" | { chart: string }>(null);
+  const [dialog, setDialog] = useState<null | "cond" | "valid" | "sort" | "names" | "fx" | "table" | { pivot: string } | { chart: string }>(null);
+  const [pivotClosed, setPivotClosed] = useState<string | null>(null);
   const [painter, setPainter] = useState<{ fmt: (CellFmt | undefined)[][]; keep: boolean } | null>(null);
-  const [dropdown, setDropdown] = useState<{ r: number; c: number; items: string[] } | null>(null);
-  const [af, setAf] = useState<{ header: number; c1: number; c2: number; hide: Record<number, string[]> } | null>(null);
+  const [dropdown, setDropdown] = useState<{ r: number; c: number; items: string[]; pick?: (item: string) => void } | null>(null);
+  // AutoFilter on a range or a table. `r2` bounds a table's data rows (otherwise the filter runs to the end of the data).
+  const [af, setAf] = useState<{ header: number; c1: number; c2: number; r2?: number; hide: Record<number, string[]> } | null>(null);
   const [afMenu, setAfMenu] = useState<number | null>(null);
   const [chartSel, setChartSel] = useState<string | null>(null);
   const [showAi, setShowAi] = useState(false);
@@ -93,6 +98,11 @@ export default function Sheets({ id }: { id: string }) {
   const si = data ? Math.min(active, data.sheets.length - 1) : 0;
   const sheet: Sheet | undefined = data?.sheets[si];
   const book = useMemo(() => (data ? new Book(data) : null), [data]);
+  // A filter belongs to the sheet it was set on.
+  useEffect(() => {
+    setAf(null);
+    setAfMenu(null);
+  }, [si]);
   const cond = useMemo(() => (sheet && book ? makeCondEval(sheet, book, si) : () => null), [sheet, book, si]);
   const range = clampBox(sel, anchor);
 
@@ -115,7 +125,7 @@ export default function Sheets({ id }: { id: string }) {
     for (let r = 0; r < nRows; r++) {
       if (hr.has(r)) continue;
       if (q && r > 0 && !(cells[r] ?? []).some((v, c) => v?.toLowerCase().includes(q) || display(book.value(si, r, c)).toLowerCase().includes(q))) continue;
-      if (afHide.length && r > af!.header && r < cells.length) {
+      if (afHide.length && r > af!.header && r < cells.length && (af!.r2 === undefined || r <= af!.r2)) {
         const hidden = afHide.some(([c, vals]) => vals.includes(cellText(book.value(si, r, Number(c)), cells[r]?.[Number(c)] ?? "", sheet.fmt?.[key(r, Number(c))]).text));
         if (hidden) continue;
       }
@@ -234,7 +244,11 @@ export default function Sheets({ id }: { id: string }) {
       }
       toast(msg);
     }
-    setCells([[r, c, value]]);
+    // Tables grow, fill calculated columns and follow renamed headers.
+    const d = dataRef.current!;
+    const old = d.sheets[si].cells[r]?.[c] ?? "";
+    const written = { ...d, sheets: d.sheets.map((x, i) => (i === si ? writeCells(x, [[r, c, value]]) : x)) };
+    commit(afterEdit(written, si, r, c, value, old));
     then?.();
     return true;
   }
@@ -329,7 +343,8 @@ export default function Sheets({ id }: { id: string }) {
   // Formula autocomplete: the function name being typed, and the function whose arguments the caret is in.
   const editValue = edit?.value ?? "";
   const typing = edit && editValue.startsWith("=") ? /([A-Z][A-Z0-9.]*)$/i.exec(editValue.slice(0, edit.caret ?? editValue.length))?.[1]?.toUpperCase() : undefined;
-  const suggestions = typing && typing.length >= 1 ? FUNCTION_NAMES.filter((n) => n.startsWith(typing)).slice(0, 8) : [];
+  const tableNames = data.sheets.flatMap((x) => (x.tables ?? []).map((t) => t.name));
+  const suggestions = typing && typing.length >= 1 ? [...tableNames.filter((n) => n.toUpperCase().startsWith(typing)), ...FUNCTION_NAMES.filter((n) => n.startsWith(typing))].slice(0, 8) : [];
   const inside = (() => {
     if (!edit || !editValue.startsWith("=")) return undefined;
     let depth = 0;
@@ -347,7 +362,7 @@ export default function Sheets({ id }: { id: string }) {
     const box = edit!.fromBar ? barInput.current : cellInput.current;
     const v = box?.value ?? editValue;
     const caret = box?.selectionStart ?? v.length;
-    const before = v.slice(0, caret).replace(/[A-Z][A-Z0-9.]*$/i, name + "(");
+    const before = v.slice(0, caret).replace(/[A-Z][A-Z0-9.]*$/i, name + (tableNames.includes(name) ? "[" : "("));
     const next = before + v.slice(caret);
     setEdit({ ...edit!, value: next, caret: before.length });
     if (box) {
@@ -818,6 +833,7 @@ export default function Sheets({ id }: { id: string }) {
     if (mod && k === "f") { e.preventDefault(); return setFind({ replace: false }); }
     if (mod && k === "h") { e.preventDefault(); return setFind({ replace: true }); }
     if (mod && k === "p") { e.preventDefault(); return printSheet(); }
+    if (mod && (k === "t" || k === "l")) { e.preventDefault(); return setDialog("table"); }
     if (mod && e.key === "`") { e.preventDefault(); return setShowFormulas((v) => !v); }
     if (mod && (e.key === ";" || e.key === ":")) {
       e.preventDefault();
@@ -1217,6 +1233,51 @@ export default function Sheets({ id }: { id: string }) {
     return { sum, count, filled, avg: count ? sum / count : 0, min, max };
   })();
 
+  // ---- Tables and pivot tables ---------------------------------------------------------------------------------------------
+  const selTable = tableAt(sheet, sel.r, sel.c);
+  const pivotHere = pivotAt(sheet, sel.r, sel.c);
+  const pivotSrc = pivotHere ? readSource(data, book, pivotHere.source, si) : null;
+  function defaultPivotSource() {
+    if (selTable) return selTable.name;
+    const b = dataRegion();
+    const q = /^[A-Za-z_]\w*$/.test(sheet!.name) ? sheet!.name : `'${sheet!.name.replace(/'/g, "''")}'`;
+    return `${q}!${rangeText(b.r1, b.c1, b.r2, b.c2).replace(/([A-Z]+)(\d+)/g, "$$$1$$$2")}`;
+  }
+  function createPivot(source: string): string | null {
+    const d = dataRef.current!;
+    const src = readSource(d, new Book(d), source, si);
+    if (typeof src === "string") return src;
+    const n = d.sheets.filter((x) => x.pivots?.length).length + 1;
+    let name = `PivotTable${n}`;
+    for (let i = n; d.sheets.some((x) => x.name.toLowerCase() === name.toLowerCase()); i++) name = `PivotTable${i + 1}`;
+    const p: Pivot = { id: Math.random().toString(36).slice(2, 10), name, source, r: 2, c: 0, rows: [], cols: [], values: [], filters: [] };
+    const withSheet: SheetsData = { ...d, sheets: [...d.sheets, { name, cells: [], pivots: [p] }] };
+    const out = refreshPivot(withSheet, withSheet.sheets.length - 1, p.id);
+    commit(out.data);
+    setActive(withSheet.sheets.length - 1);
+    setAnchor({ r: 2, c: 0 });
+    setSel({ r: 2, c: 0 });
+    setPivotClosed(null);
+    return null;
+  }
+  function updatePivot(p: Pivot) {
+    const d = dataRef.current!;
+    const next = { ...d, sheets: d.sheets.map((x, i) => (i === si ? { ...x, pivots: (x.pivots ?? []).map((y) => (y.id === p.id ? p : y)) } : x)) };
+    const out = refreshPivot(next, si, p.id);
+    commit(out.data);
+  }
+  function refreshAllPivots() {
+    let d = dataRef.current!;
+    let n = 0;
+    d.sheets.forEach((x, i) => (x.pivots ?? []).forEach((p) => {
+      d = refreshPivot(d, i, p.id).data;
+      n++;
+    }));
+    if (!n) return toast("There are no PivotTables in this workbook");
+    commit(d);
+    toast(`Refreshed ${n} PivotTable${n === 1 ? "" : "s"}`, "success");
+  }
+
   // ---- Rendering ---------------------------------------------------------------------------------------------------------
   const curFmt = fmtAt(sel.r, sel.c) ?? {};
   const frozenRows = geo.rows.filter((r) => r < fr);
@@ -1267,6 +1328,8 @@ export default function Sheets({ id }: { id: string }) {
     const rawV = raw(r, c);
     const v = covered ? "" : ev(r, c);
     const look = covered ? null : cond(r, c);
+    const tbl = tableAt(sheet!, r, c);
+    const tl = tbl && !covered ? tableLook(tbl, r, c) : null;
     const shown = showFormulas && rawV.startsWith("=") ? { text: rawV, align: "left" as const, color: undefined, isNum: false } : covered ? { text: "", align: "left" as const, color: undefined, isNum: false } : cellText(v, rawV, fm);
     const links = typeof v === "string" && !covered ? findLinks(shown.text) : [];
     const align = fm?.align ?? shown.align;
@@ -1279,13 +1342,13 @@ export default function Sheets({ id }: { id: string }) {
       ...(spills && !sticky ? { zIndex: 1 } : {}),
       // A merged block overlaps the covered cells after it instead of pushing them right.
       ...(m && !covered ? { zIndex: 1, marginRight: geo!.cw(c) - width } : {}),
-      fontWeight: fm?.bold || look?.bold ? 700 : undefined,
+      fontWeight: fm?.bold || look?.bold || (tl?.bold && fm?.bold !== false) ? 700 : undefined,
       fontStyle: fm?.italic ? "italic" : undefined,
       textDecoration: [fm?.underline && "underline", fm?.strike && "line-through"].filter(Boolean).join(" ") || undefined,
       fontFamily: fm?.font ? `"${fm.font}", Carlito, sans-serif` : undefined,
       fontSize: fm?.size ? fontPx(fm.size) : undefined,
-      color: look?.color ?? shown.color ?? fm?.color,
-      background: look?.bg ?? fm?.bg ?? (sticky || (m && !covered) ? "#ffffff" : undefined),
+      color: look?.color ?? shown.color ?? fm?.color ?? tl?.color,
+      background: look?.bg ?? fm?.bg ?? tl?.bg ?? (sticky || (m && !covered) ? "#ffffff" : undefined),
       justifyContent: align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start",
       alignItems: fm?.valign === "top" ? "flex-start" : fm?.valign === "middle" ? "center" : "flex-end",
       whiteSpace: fm?.wrap ? "pre-wrap" : "pre",
@@ -1293,7 +1356,7 @@ export default function Sheets({ id }: { id: string }) {
       overflow: spills && !isSel ? "visible" : undefined,
     };
     const cls = ["cell", inBox(range, r, c) && !isSel && "in", isSel && "sel", shown.isNum && "num", v instanceof FErr && "err", covered && "covered", fillTarget && inBox(fillTarget, r, c) && "filling", sheet!.showGrid === false && "nogrid", sticky && c === lastFrozen && "frz-edge"].filter(Boolean).join(" ");
-    const border = fm?.border;
+    const border = fm?.border ?? (tl?.border ? { t: tl.border.t, b: tl.border.b } : undefined);
     const side = (b?: Border) => (b ? `${b.style === "thick" ? 3 : b.style === "medium" || b.style === "double" ? 2 : 1}px ${b.style === "dashed" ? "dashed" : b.style === "dotted" ? "dotted" : b.style === "double" ? "double" : "solid"} ${b.color}` : undefined);
     const editingHere = isSel && edit && !edit.fromBar;
     return (
@@ -1348,8 +1411,25 @@ export default function Sheets({ id }: { id: string }) {
           <button className="cell-drop" title="Choose from the list" aria-label="Choose from the list" onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); setDropdown({ r, c, items: listItems(listRule, book!, si) }); }}><ChevronDown /></button>
         )}
         {r === range.r2 && c === range.c2 && !edit && <span className="fill-handle" title="Drag to fill" onMouseDown={startFill} onDoubleClick={fillDoubleClick} />}
-        {af && r === af.header && c >= af.c1 && c <= af.c2 && (
-          <button className={"af-btn" + (af.hide[c]?.length ? " on" : "")} title="Filter and sort" aria-label="Filter and sort" onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); setAfMenu(afMenu === c ? null : c); }}><Filter /></button>
+        {((af && r === af.header && c >= af.c1 && c <= af.c2) || (tbl && tbl.header !== false && tbl.filter !== false && r === tbl.r1 && !(isSel && edit))) && (
+          <button className={"af-btn" + (af && af.header === r && af.hide[c]?.length ? " on" : "")} title="Filter and sort" aria-label="Filter and sort" onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (tbl && r === tbl.r1 && (!af || af.header !== tbl.r1 || af.c1 !== tbl.c1)) setAf({ header: tbl.r1, c1: tbl.c1, c2: tbl.c2, r2: dataRows(tbl).d2, hide: {} });
+            else if (tbl && af && af.header === tbl.r1) setAf({ ...af, c2: tbl.c2, r2: dataRows(tbl).d2 });
+            setAfMenu(afMenu === c ? null : c);
+          }}><Filter /></button>
+        )}
+        {isSel && !edit && tbl?.totals && r === tbl.r2 && c !== tbl.c1 && (
+          <button className="cell-drop" title="Total" aria-label="Choose a total" onMouseDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const t = tbl;
+            setDropdown({ r, c, items: TOTAL_FNS.map((x) => x.label), pick: (label) => {
+              const code = TOTAL_FNS.find((x) => x.label === label)?.code ?? 0;
+              commitValue(r, c, totalFormula(t, headerTexts(sheet!, t)[c - t.c1], code));
+            } });
+          }}><ChevronDown /></button>
         )}
       </div>
     );
@@ -1413,7 +1493,7 @@ export default function Sheets({ id }: { id: string }) {
   const afValues = (c: number) => {
     if (!af) return [];
     const set = new Set<string>();
-    for (let r = af.header + 1; r < cells.length; r++) set.add(cellText(ev(r, c), raw(r, c), fmtAt(r, c)).text);
+    for (let r = af.header + 1; r <= (af.r2 ?? cells.length - 1); r++) set.add(cellText(ev(r, c), raw(r, c), fmtAt(r, c)).text);
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   };
 
@@ -1507,12 +1587,40 @@ export default function Sheets({ id }: { id: string }) {
           }}><Filter /></button>
         <button onClick={() => quickSort(false)} title={`Sort A–Z by column ${colName(sel.c)}`} aria-label="Sort A to Z"><ArrowDownAZ /></button>
         <button onClick={() => quickSort(true)} title={`Sort Z–A by column ${colName(sel.c)}`} aria-label="Sort Z to A"><ArrowDownZA /></button>
+        {selTable && (
+          <TableDesign
+            key={selTable.name}
+            table={selTable}
+            onPatch={(patch) => updateSheet((s) => ({ ...s, tables: (s.tables ?? []).map((t) => (t.name === selTable.name ? { ...t, ...patch } : t)) }))}
+            onRename={(name) => {
+              const bad = badTableName(data, name, selTable.name);
+              if (bad) return bad;
+              commit(renameTable(data, selTable.name, name));
+              return null;
+            }}
+            onTotals={(on) => commit(setTotals(data, si, selTable.name, on))}
+            onResize={async () => {
+              const r = await askText("Resize table", { value: rangeText(selTable.r1, selTable.c1, selTable.r2, selTable.c2), label: "New range for the table (the header row stays put)", confirmLabel: "Resize" });
+              if (!r) return;
+              const res = resizeTable(data, si, selTable.name, r.toUpperCase());
+              if (typeof res === "string") toast(res, "error");
+              else commit(res);
+            }}
+            onConvert={async () => {
+              if (await askConfirm(`Convert ${selTable.name} to a normal range?`, { body: "Its look stays, and formulas that use the table switch to cell references.", confirmLabel: "Convert" })) commit(convertToRange(data, si, selTable.name));
+            }}
+            onSelect={() => { setAnchor({ r: selTable.r2, c: selTable.c2 }); setSel({ r: selTable.r1, c: selTable.c1 }); }}
+            onPivot={() => setDialog({ pivot: selTable.name })}
+          />
+        )}
         <span className="sep" />
         <Menu label="Insert" align="left">
           <button role="menuitem" onClick={() => insertRows(true)}>Row above</button>
           <button role="menuitem" onClick={() => insertRows(false)}>Row below</button>
           <button role="menuitem" onClick={() => insertCols(true)}>Column left</button>
           <button role="menuitem" onClick={() => insertCols(false)}>Column right</button>
+          <button role="menuitem" onClick={() => setDialog("table")}>Table… <span className="key">Ctrl T</span></button>
+          <button role="menuitem" onClick={() => setDialog({ pivot: defaultPivotSource() })}>PivotTable…</button>
           <button role="menuitem" onClick={addChart}>Chart</button>
           <button role="menuitem" onClick={() => setDialog("fx")}>Function…</button>
           <button role="menuitem" onClick={async () => { const n = await askText("Note", { value: sheet.notes?.[key(sel.r, sel.c)] ?? "", confirmLabel: "Save" }); if (n !== null && n !== undefined) updateSheet((s) => { const notes = { ...(s.notes ?? {}) }; if (n) notes[key(sel.r, sel.c)] = n; else delete notes[key(sel.r, sel.c)]; return { ...s, notes }; }); }}>Note…</button>
@@ -1523,6 +1631,7 @@ export default function Sheets({ id }: { id: string }) {
           <button role="menuitem" onClick={() => setDialog("cond")}>Conditional formatting…</button>
           <button role="menuitem" onClick={() => setDialog("valid")}>Data validation…</button>
           <button role="menuitem" onClick={() => setDialog("names")}>Named ranges…</button>
+          <button role="menuitem" onClick={refreshAllPivots}>Refresh all PivotTables</button>
           <button role="menuitem" onClick={removeDuplicates}>Remove duplicate rows</button>
           <button role="menuitem" onClick={trimSpaces}>Trim extra spaces</button>
           <button role="menuitem" onClick={splitColumn}>Split text to columns…</button>
@@ -1660,7 +1769,7 @@ export default function Sheets({ id }: { id: string }) {
                   const top = HEAD_H + (dropdown.r < fr ? geo.tops[i] : frozenH + geo.tops[i] - bodyTop0) + geo.rh(dropdown.r);
                   return (
                     <div className="sh-dropdown pop" style={{ left: HEAD_W + geo.colX[dropdown.c], top, minWidth: geo.cw(dropdown.c) }}>
-                      {dropdown.items.map((it) => <button key={it} onMouseDown={(e) => e.preventDefault()} onClick={() => { commitValue(dropdown.r, dropdown.c, it); setDropdown(null); grid.current?.focus(); }}>{it}</button>)}
+                      {dropdown.items.map((it) => <button key={it} onMouseDown={(e) => e.preventDefault()} onClick={() => { if (dropdown.pick) dropdown.pick(it); else commitValue(dropdown.r, dropdown.c, it); setDropdown(null); grid.current?.focus(); }}>{it}</button>)}
                       {!dropdown.items.length && <span className="muted small">No items</span>}
                     </div>
                   );
@@ -1674,7 +1783,7 @@ export default function Sheets({ id }: { id: string }) {
                       top={top}
                       values={afValues(afMenu)}
                       hidden={af.hide[afMenu] ?? []}
-                      onSort={(desc) => { sortBy([{ col: afMenu, desc }], true, { r1: af.header, c1: af.c1, r2: cells.length - 1, c2: af.c2 }); setAfMenu(null); }}
+                      onSort={(desc) => { sortBy([{ col: afMenu, desc }], true, { r1: af.header, c1: af.c1, r2: af.r2 ?? cells.length - 1, c2: af.c2 }); setAfMenu(null); }}
                       onApply={(hidden) => { setAf({ ...af, hide: { ...af.hide, [afMenu]: hidden } }); setAfMenu(null); }}
                       onClose={() => setAfMenu(null)}
                     />
@@ -1713,6 +1822,20 @@ export default function Sheets({ id }: { id: string }) {
             <span className="stats">{Math.round(zoom * 100)}%</span>
           </div>
         </div>
+        {pivotHere && pivotSrc && pivotClosed !== pivotHere.id && !showAi && (
+          <PivotPanel
+            key={pivotHere.id}
+            pivot={pivotHere}
+            fields={typeof pivotSrc === "string" ? [] : pivotSrc.fields}
+            dates={typeof pivotSrc === "string" ? new Set() : pivotSrc.dates}
+            numeric={typeof pivotSrc === "string" ? new Set() : pivotSrc.numeric}
+            items={(field) => pivotItems(data, si, pivotHere, field)}
+            error={typeof pivotSrc === "string" ? pivotSrc : undefined}
+            onChange={(p) => updatePivot(p)}
+            onRefresh={() => updatePivot(pivotHere)}
+            onClose={() => setPivotClosed(pivotHere.id)}
+          />
+        )}
         {showAi && (
           <AiPanel
             intro="I can fill in tables, write formulas, add totals and summaries, clean up or sort data, add sheets, and answer questions about the numbers. One Ctrl+Z undoes a whole answer."
@@ -1765,6 +1888,22 @@ export default function Sheets({ id }: { id: string }) {
         </ContextMenu>
       )}
 
+      {dialog === "table" && (
+        <CreateTableDialog
+          range={(() => { const b = dataRegion(); return rangeText(b.r1, b.c1, b.r2, b.c2); })()}
+          onCreate={(r, header) => {
+            const b = parseRange(r);
+            if (!b) return "Type a range like A1:D20.";
+            const res = createTable(data, si, b, header);
+            if (typeof res === "string") return res;
+            commit(res);
+            if (af) setAf(null);
+            return null;
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {typeof dialog === "object" && dialog && "pivot" in dialog && <CreatePivotDialog source={dialog.pivot} onCreate={createPivot} onClose={() => setDialog(null)} />}
       {dialog === "cond" && <CondDialog rules={sheet.cond ?? []} selection={selText} onSave={(rules) => updateSheet((s) => ({ ...s, cond: rules }))} onClose={() => setDialog(null)} />}
       {dialog === "valid" && (
         <ValidDialog
@@ -1794,7 +1933,7 @@ export default function Sheets({ id }: { id: string }) {
           onClose={() => setDialog(null)}
         />
       )}
-      {typeof dialog === "object" && dialog?.chart && (() => {
+      {typeof dialog === "object" && dialog && "chart" in dialog && (() => {
         const c = sheet.charts?.find((x) => x.id === dialog.chart);
         if (!c) return null;
         return <ChartDialog chart={c} onSave={(n) => updateSheet((s) => ({ ...s, charts: (s.charts ?? []).map((x) => (x.id === n.id ? n : x)) }))} onDelete={() => updateSheet((s) => ({ ...s, charts: (s.charts ?? []).filter((x) => x.id !== c.id) }))} onClose={() => setDialog(null)} />;
