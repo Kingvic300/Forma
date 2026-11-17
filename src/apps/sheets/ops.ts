@@ -66,6 +66,7 @@ export function shiftAxis(data: SheetsData, si: number, axis: "row" | "col", at:
       n.cells = Array.from(out, (r) => r ?? []);
       n.fmt = remapKeys(s.fmt, (r, c) => (map(r) === null ? null : [map(r)!, c]));
       n.notes = remapKeys(s.notes, (r, c) => (map(r) === null ? null : [map(r)!, c]));
+      n.sparklines = remapKeys(s.sparklines, (r, c) => (map(r) === null ? null : [map(r)!, c]));
       n.rowH = remapIndex(s.rowH, map);
       n.hiddenRows = s.hiddenRows?.map(map).filter((x): x is number => x !== null);
       if (s.freeze && s.freeze.r > at) n.freeze = { ...s.freeze, r: Math.max(at, s.freeze.r + count) };
@@ -80,6 +81,7 @@ export function shiftAxis(data: SheetsData, si: number, axis: "row" | "col", at:
       });
       n.fmt = remapKeys(s.fmt, (r, c) => (map(c) === null ? null : [r, map(c)!]));
       n.notes = remapKeys(s.notes, (r, c) => (map(c) === null ? null : [r, map(c)!]));
+      n.sparklines = remapKeys(s.sparklines, (r, c) => (map(c) === null ? null : [r, map(c)!]));
       n.colW = remapIndex(s.colW, map);
       n.hiddenCols = s.hiddenCols?.map(map).filter((x): x is number => x !== null);
       if (s.freeze && s.freeze.c > at) n.freeze = { ...s.freeze, c: Math.max(at, s.freeze.c + count) };
@@ -94,6 +96,7 @@ export function shiftAxis(data: SheetsData, si: number, axis: "row" | "col", at:
     n.cond = s.cond?.map((r) => ({ ...r, range: remapRangeText(r.range, axis, at, count) ?? "" })).filter((r) => r.range);
     n.valid = s.valid?.map((r) => ({ ...r, range: remapRangeText(r.range, axis, at, count) ?? "" })).filter((r) => r.range);
     n.charts = s.charts?.map((ch) => ({ ...ch, range: remapRangeText(ch.range, axis, at, count) ?? ch.range }));
+    if (n.sparklines) n.sparklines = Object.fromEntries(Object.entries(n.sparklines).map(([k, sp]) => [k, { ...sp, range: remapRangeText(sp.range, axis, at, count) ?? sp.range }]));
     const moved = shiftTables({ ...s, pivots }, axis, at, count);
     if (s.tables) n.tables = moved.tables;
     if (s.pivots) n.pivots = moved.pivots;

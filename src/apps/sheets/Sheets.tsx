@@ -14,8 +14,9 @@ import { useFile } from "../../lib/useFile";
 import { safeName, saveAs } from "../../lib/platform";
 import { csvToCells, workbookToSheets } from "../../lib/importers";
 import { TitleBar, Missing, Menu } from "../../ui";
-import { ChartView } from "../slides/render";
-import type { Chart } from "../slides/types";
+import { buildChart, type ChartModel } from "./chart";
+import { SheetChartView, SparklineSvg } from "./chartview";
+import { ChartDialog, SparklineDialog } from "./chartui";
 import { Book, colName, display, FErr, parseRange, rangeText } from "./formula";
 import { adjustDecimals, CURRENCIES, NUMBER_FORMATS, nowSerial, todaySerial, formatValue } from "./format";
 import { cycleAbsolute, moveFormula } from "./refs";
@@ -23,11 +24,11 @@ import { extendSeries, renameSheet, shiftAxis, sortRange } from "./ops";
 import { checkValid, listItems, makeCondEval, validationAt } from "./rules";
 import { cellText, formatOf } from "./view";
 import { sheetHtml, printHtml } from "./print";
-import { BorderMenu, ChartDialog, ColorMenu, CondDialog, FindBar, FunctionPicker, FUNCTION_NAMES, NamesDialog, SIGNATURES, SortDialog, ValidDialog, type BorderKind, type FindOpts } from "./parts";
+import { BorderMenu, ColorMenu, CondDialog, FindBar, FunctionPicker, FUNCTION_NAMES, NamesDialog, SIGNATURES, SortDialog, ValidDialog, type BorderKind, type FindOpts } from "./parts";
 import { afterEdit, badTableName, convertToRange, createTable, dataRows, renameTable, resizeTable, setTotals, tableAt, tableLook, totalFormula, headerTexts, TOTAL_FNS } from "./tables";
 import { pivotAt, pivotItems, readSource, refreshPivot } from "./pivot";
 import { CreatePivotDialog, CreateTableDialog, PivotPanel, TableDesign } from "./tableui";
-import type { Border, CellFmt, Pivot, Sheet, SheetChart, SheetsData } from "./types";
+import type { Border, CellFmt, Pivot, Sheet, SheetChart, SheetsData, Sparkline } from "./types";
 import { key } from "./types";
 
 const ROW_H = 24;
@@ -36,7 +37,6 @@ const HEAD_W = 52;
 const HEAD_H = 26;
 const FONTS = ["Calibri", "Arial", "Helvetica", "Verdana", "Tahoma", "Georgia", "Times New Roman", "Courier New", "Mona Sans"];
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
-const CHART_COLORS = ["#4472c4", "#ed7d31", "#a5a5a5", "#ffc000", "#5b9bd5", "#70ad47", "#264478", "#9e480e", "#636363", "#997300"];
 
 type Pos = { r: number; c: number };
 type Box = { r1: number; c1: number; r2: number; c2: number };
@@ -72,7 +72,7 @@ export default function Sheets({ id }: { id: string }) {
   const [find, setFind] = useState<{ replace: boolean } | null>(null);
   const [findCount, setFindCount] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; kind: "cell" | "row" | "col" | "tab"; tab?: number } | null>(null);
-  const [dialog, setDialog] = useState<null | "cond" | "valid" | "sort" | "names" | "fx" | "table" | { pivot: string } | { chart: string }>(null);
+  const [dialog, setDialog] = useState<null | "cond" | "valid" | "sort" | "names" | "fx" | "table" | "spark" | { pivot: string } | { chart: string }>(null);
   const [pivotClosed, setPivotClosed] = useState<string | null>(null);
   const [painter, setPainter] = useState<{ fmt: (CellFmt | undefined)[][]; keep: boolean } | null>(null);
   const [dropdown, setDropdown] = useState<{ r: number; c: number; items: string[]; pick?: (item: string) => void } | null>(null);
@@ -1095,39 +1095,38 @@ export default function Sheets({ id }: { id: string }) {
     updateSheet((s) => ({ ...s, charts: [...(s.charts ?? []), c] }));
     setChartSel(c.id);
   }
-  function chartData(c: SheetChart): Chart | null {
-    const b = parseRange(c.range);
-    if (!b) return null;
-    const val = (r: number, cc: number) => {
-      const v = ev(r, cc);
-      return v instanceof FErr ? "" : v;
-    };
-    const firstIsLabel = typeof val(b.r1 + 1, b.c1) === "string" || b.c1 === b.c2 ? b.c1 < b.c2 : false;
-    const headerRow = typeof val(b.r1, b.c2) === "string" && b.r1 < b.r2;
-    const dataC1 = firstIsLabel ? b.c1 + 1 : b.c1;
-    const dataR1 = headerRow ? b.r1 + 1 : b.r1;
-    const categories = Array.from({ length: b.r2 - dataR1 + 1 }, (_, i) => (firstIsLabel ? cellText(ev(dataR1 + i, b.c1), raw(dataR1 + i, b.c1), fmtAt(dataR1 + i, b.c1)).text : String(i + 1)));
-    const series = Array.from({ length: b.c2 - dataC1 + 1 }, (_, j) => ({
-      name: headerRow ? String(val(b.r1, dataC1 + j)) : `Series ${j + 1}`,
-      color: CHART_COLORS[j % CHART_COLORS.length],
-      values: categories.map((_, i) => {
-        const v = val(dataR1 + i, dataC1 + j);
-        return typeof v === "number" ? v : Number(v) || 0;
-      }),
-      colors: categories.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
-    }));
-    return {
-      kind: c.kind === "column" ? "bar" : c.kind,
-      horizontal: c.kind === "bar",
-      stacked: c.stacked,
-      percent: c.percent,
-      title: c.title,
-      categories,
-      series,
-      legend: c.legend === false ? undefined : c.kind === "pie" || c.kind === "doughnut" ? "r" : "b",
-      labels: c.labels,
-      textColor: "#404040",
-    };
+  function chartData(c: SheetChart): ChartModel | null {
+    return buildChart(c, (r, cc) => ev(r, cc), (r, cc) => cellText(ev(r, cc), raw(r, cc), fmtAt(r, cc)).text);
+  }
+  /** Numbers for a sparkline, in reading order. */
+  function sparkValues(range: string): number[] {
+    const b = parseRange(range);
+    if (!b) return [];
+    const out: number[] = [];
+    for (let r = b.r1; r <= Math.min(b.r2, b.r1 + 500); r++)
+      for (let cc = b.c1; cc <= Math.min(b.c2, b.c1 + 500); cc++) {
+        const v = ev(r, cc);
+        if (typeof v === "number") out.push(v);
+      }
+    return out;
+  }
+  /** Put sparklines in `loc`; several cells each get their own row (or column) of the data. */
+  function saveSparklines(loc: string, sp: Sparkline): string | null {
+    const L = parseRange(loc), D = parseRange(sp.range);
+    if (!L || !D) return "Type ranges like B2:M2 and N2.";
+    const cellsL: [number, number][] = [];
+    for (let r = L.r1; r <= L.r2; r++) for (let cc = L.c1; cc <= L.c2; cc++) cellsL.push([r, cc]);
+    const vertical = L.c1 === L.c2;
+    const parts = cellsL.length === 1 ? [sp.range] : vertical
+      ? Array.from({ length: D.r2 - D.r1 + 1 }, (_, i) => rangeText(D.r1 + i, D.c1, D.r1 + i, D.c2))
+      : Array.from({ length: D.c2 - D.c1 + 1 }, (_, i) => rangeText(D.r1, D.c1 + i, D.r2, D.c1 + i));
+    if (parts.length !== cellsL.length) return `The location has ${cellsL.length} cells but the data has ${parts.length} ${vertical ? "rows" : "columns"}.`;
+    updateSheet((s) => {
+      const sparklines = { ...(s.sparklines ?? {}) };
+      cellsL.forEach(([r, cc], i) => (sparklines[key(r, cc)] = { ...sp, range: parts[i] }));
+      return { ...s, sparklines };
+    });
+    return null;
   }
   function chartDrag(e: React.MouseEvent, c: SheetChart, mode: "move" | "resize") {
     e.preventDefault();
@@ -1369,6 +1368,10 @@ export default function Sheets({ id }: { id: string }) {
         {look?.bar && <span className="cell-bar" style={{ width: `${Math.max(0, Math.min(1, look.bar.pct)) * 100}%`, background: `linear-gradient(90deg, ${look.bar.color}, ${look.bar.color}55)` }} />}
         {border && <span className="cell-border" style={{ borderTop: side(border.t), borderRight: side(border.r), borderBottom: side(border.b), borderLeft: side(border.l) }} />}
         {sheet!.notes?.[key(r, c)] && <span className="cell-note" />}
+        {!covered && sheet!.sparklines?.[key(r, c)] && (() => {
+          const sp = sheet!.sparklines![key(r, c)];
+          return <SparklineSvg values={sparkValues(sp.range)} kind={sp.kind} color={sp.color} highLow={sp.highLow} w={width - 2} h={height - 2} />;
+        })()}
         {editingHere ? (
           <textarea
             ref={(el) => {
@@ -1622,6 +1625,7 @@ export default function Sheets({ id }: { id: string }) {
           <button role="menuitem" onClick={() => setDialog("table")}>Table… <span className="key">Ctrl T</span></button>
           <button role="menuitem" onClick={() => setDialog({ pivot: defaultPivotSource() })}>PivotTable…</button>
           <button role="menuitem" onClick={addChart}>Chart</button>
+          <button role="menuitem" onClick={() => setDialog("spark")}>Sparklines…</button>
           <button role="menuitem" onClick={() => setDialog("fx")}>Function…</button>
           <button role="menuitem" onClick={async () => { const n = await askText("Note", { value: sheet.notes?.[key(sel.r, sel.c)] ?? "", confirmLabel: "Save" }); if (n !== null && n !== undefined) updateSheet((s) => { const notes = { ...(s.notes ?? {}) }; if (n) notes[key(sel.r, sel.c)] = n; else delete notes[key(sel.r, sel.c)]; return { ...s, notes }; }); }}>Note…</button>
           <button role="menuitem" onClick={() => addSheet()}>Sheet</button>
@@ -1747,7 +1751,7 @@ export default function Sheets({ id }: { id: string }) {
                       onMouseDown={(e) => chartDrag(e, c, "move")}
                       onDoubleClick={() => setDialog({ chart: c.id })}
                     >
-                      {chart && <ChartView chart={chart} w={c.w - 16} h={c.h - 16} />}
+                      {chart && <SheetChartView model={chart} w={c.w - 16} h={c.h - 16} />}
                       {chartSel === c.id && (
                         <>
                           <button className="sh-chart-edit" onMouseDown={(e) => e.stopPropagation()} onClick={() => setDialog({ chart: c.id })}>Edit chart</button>
@@ -1904,6 +1908,30 @@ export default function Sheets({ id }: { id: string }) {
         />
       )}
       {typeof dialog === "object" && dialog && "pivot" in dialog && <CreatePivotDialog source={dialog.pivot} onCreate={createPivot} onClose={() => setDialog(null)} />}
+      {dialog === "spark" && (() => {
+        const existing = sheet.sparklines?.[key(sel.r, sel.c)];
+        const b = dataRegion();
+        const multi = range.r1 !== range.r2 || range.c1 !== range.c2;
+        const dataGuess = existing?.range ?? rangeText(b.r1 + (typeof ev(b.r1, b.c2) === "string" ? 1 : 0), b.c1 + (typeof ev(b.r2, b.c1) === "string" ? 1 : 0), b.r2, b.c2);
+        const locGuess = multi ? selText : rangeText(sel.r, sel.c, sel.r, sel.c);
+        return (
+          <SparklineDialog
+            data={dataGuess}
+            location={locGuess}
+            onSave={saveSparklines}
+            onRemove={(loc) => {
+              const L = parseRange(loc);
+              if (!L) return;
+              updateSheet((s) => {
+                const sparklines = { ...(s.sparklines ?? {}) };
+                for (let r = L.r1; r <= L.r2; r++) for (let cc = L.c1; cc <= L.c2; cc++) delete sparklines[key(r, cc)];
+                return { ...s, sparklines };
+              });
+            }}
+            onClose={() => setDialog(null)}
+          />
+        );
+      })()}
       {dialog === "cond" && <CondDialog rules={sheet.cond ?? []} selection={selText} onSave={(rules) => updateSheet((s) => ({ ...s, cond: rules }))} onClose={() => setDialog(null)} />}
       {dialog === "valid" && (
         <ValidDialog
@@ -1936,7 +1964,7 @@ export default function Sheets({ id }: { id: string }) {
       {typeof dialog === "object" && dialog && "chart" in dialog && (() => {
         const c = sheet.charts?.find((x) => x.id === dialog.chart);
         if (!c) return null;
-        return <ChartDialog chart={c} onSave={(n) => updateSheet((s) => ({ ...s, charts: (s.charts ?? []).map((x) => (x.id === n.id ? n : x)) }))} onDelete={() => updateSheet((s) => ({ ...s, charts: (s.charts ?? []).filter((x) => x.id !== c.id) }))} onClose={() => setDialog(null)} />;
+        return <ChartDialog chart={c} preview={chartData} onSave={(n) => updateSheet((s) => ({ ...s, charts: (s.charts ?? []).map((x) => (x.id === n.id ? n : x)) }))} onDelete={() => updateSheet((s) => ({ ...s, charts: (s.charts ?? []).filter((x) => x.id !== c.id) }))} onClose={() => setDialog(null)} />;
       })()}
     </div>
   );

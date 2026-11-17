@@ -574,7 +574,7 @@ table.wc kbd { font: 12px var(--mono); }
 /* Dialogs */
 .sh-form { display: flex; flex-direction: column; gap: 10px; }
 .sh-form > label:not(.check) { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-2); }
-.sh-form > label > input, .sh-form > label > select { width: 100%; min-width: 0; }
+.sh-form > label:not(.check) > input, .sh-form > label:not(.check) > select { width: 100%; min-width: 0; }
 .sh-colors { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
 .sh-rules { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
 .sh-rule { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 4px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); }
@@ -1079,3 +1079,19 @@ button.sl-rail-more .chev { display: none; }
 .sh-pv-items { width: 230px; gap: 4px; padding: 6px; }
 .sh-pv-items .sh-af-list { margin: 0; }
 .sh-pivot > * { flex: none; }
+
+/* Sheets: charts and sparklines */
+.modal.wide:has(.sh-chartdlg) { width: min(820px, 100%); }
+.sh-chartdlg { display: grid; grid-template-columns: 320px 1fr; gap: 16px; min-height: 360px; }
+.sh-chartdlg-preview { display: grid; place-items: center; align-self: start; padding: 10px; background: #fff; border-radius: var(--r); }
+.sh-chartdlg-preview .muted { color: #666; }
+.sh-chartdlg-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.sh-seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.sh-seg button { height: 26px; padding: 0 9px; font-size: 12px; }
+.sh-chartdlg .sh-form > label:not(.check) { grid-template-columns: 110px 1fr; }
+.sh-checks { display: flex; gap: 14px; }
+.sh-series-row { display: flex; align-items: center; gap: 8px; }
+.sh-series-dot { width: 10px; height: 10px; flex: none; border-radius: 2px; }
+.sh-series-row select { width: 96px; }
+.cell-spark { position: absolute; left: 1px; top: 1px; pointer-events: none; }
+@media (max-width: 760px) { .sh-chartdlg { grid-template-columns: 1fr; } }

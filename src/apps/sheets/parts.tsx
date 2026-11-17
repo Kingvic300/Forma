@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ChevronDown, Plus, Search, Trash2, X } from "lucide
 import { Modal, useDismiss } from "../../ui";
 import { colName, parseRange } from "./formula";
 import { FUNCTIONS, SIGNATURES } from "./functions";
-import type { Border, CondRule, SheetChart, Validation } from "./types";
+import type { Border, CondRule, Validation } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -324,54 +324,6 @@ export function SortDialog({ range, headers, onSort, onClose }: { range: { c1: n
         <span className="grow" />
         <button onClick={onClose}>Cancel</button>
         <button className="primary" onClick={() => { onSort(levels, hasHeader); onClose(); }}>Sort</button>
-      </div>
-    </Modal>
-  );
-}
-
-// ---- Charts -------------------------------------------------------------------------------------------------
-
-export const CHART_KINDS: { kind: SheetChart["kind"]; label: string }[] = [
-  { kind: "column", label: "Column" },
-  { kind: "bar", label: "Bar" },
-  { kind: "line", label: "Line" },
-  { kind: "area", label: "Area" },
-  { kind: "pie", label: "Pie" },
-  { kind: "doughnut", label: "Doughnut" },
-  { kind: "scatter", label: "Scatter" },
-];
-
-export function ChartDialog({ chart, onSave, onDelete, onClose }: { chart: SheetChart; onSave: (c: SheetChart) => void; onDelete: () => void; onClose: () => void }) {
-  const [c, setC] = useState(chart);
-  const stackable = c.kind === "column" || c.kind === "bar" || c.kind === "area" || c.kind === "line";
-  return (
-    <Modal title="Chart" onClose={onClose}>
-      <div className="sh-form">
-        <label><span>Type</span>
-          <select value={c.kind} onChange={(e) => setC({ ...c, kind: e.target.value as SheetChart["kind"] })}>
-            {CHART_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
-          </select>
-        </label>
-        {stackable && (
-          <label><span>Grouping</span>
-            <select value={c.percent ? "percent" : c.stacked ? "stacked" : "clustered"} onChange={(e) => setC({ ...c, stacked: e.target.value !== "clustered", percent: e.target.value === "percent" })}>
-              <option value="clustered">Side by side</option>
-              <option value="stacked">Stacked</option>
-              <option value="percent">100% stacked</option>
-            </select>
-          </label>
-        )}
-        <label><span>Data range</span><input value={c.range} onChange={(e) => setC({ ...c, range: e.target.value.toUpperCase() })} /></label>
-        <label><span>Title</span><input value={c.title ?? ""} onChange={(e) => setC({ ...c, title: e.target.value || undefined })} /></label>
-        <label className="check"><input type="checkbox" checked={c.legend !== false} onChange={(e) => setC({ ...c, legend: e.target.checked })} /> <span>Show legend</span></label>
-        <label className="check"><input type="checkbox" checked={!!c.labels} onChange={(e) => setC({ ...c, labels: e.target.checked })} /> <span>Show values on the chart</span></label>
-        <p className="muted small">The first row of the range names the series and the first column labels the categories.</p>
-      </div>
-      <div className="modal-foot">
-        <button onClick={() => { onDelete(); onClose(); }}><Trash2 /> Delete chart</button>
-        <span className="grow" />
-        <button onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={!parseRange(c.range)} onClick={() => { onSave(c); onClose(); }}>Save</button>
       </div>
     </Modal>
   );
