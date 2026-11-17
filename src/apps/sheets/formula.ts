@@ -1,36 +1,92 @@
-// Small spreadsheet formula engine: arithmetic, comparisons, & concatenation,
-// cell refs (A1, $A$1), ranges (A1:B9) and common functions.
+// Spreadsheet formula engine: Excel-style syntax and semantics. References (A1, $A$1,
+// Sheet2!A1, 'My sheet'!A1:B9, A:A, 1:1, A1#), named ranges, array constants {1,2;3,4},
+// dynamic arrays that spill into neighbouring cells, LET and LAMBDA, and the function library
+// in functions.ts. Errors are values (#DIV/0!, #N/A…) that flow through calculations.
+import { FUNCTIONS } from "./functions";
+import { parseInput } from "./format";
 
 export type Val = number | string | boolean;
 export class FErr {
   constructor(public code: string) {}
 }
+/** A rectangular block of values, row-major. */
+export class Arr {
+  constructor(public rows: number, public cols: number, public v: (Val | FErr)[]) {}
+  at(r: number, c: number): Val | FErr {
+    // Single rows and columns broadcast, as in Excel.
+    const rr = this.rows === 1 ? 0 : r, cc = this.cols === 1 ? 0 : c;
+    if (rr >= this.rows || cc >= this.cols) return new FErr("#N/A");
+    return this.v[rr * this.cols + cc];
+  }
+  static of(rows: (Val | FErr)[][]) {
+    const cols = Math.max(1, ...rows.map((r) => r.length));
+    return new Arr(rows.length, cols, rows.flatMap((r) => Array.from({ length: cols }, (_, i) => r[i] ?? new FErr("#N/A"))));
+  }
+  row(r: number) {
+    return this.v.slice(r * this.cols, (r + 1) * this.cols);
+  }
+  col(c: number) {
+    return Array.from({ length: this.rows }, (_, r) => this.v[r * this.cols + c]);
+  }
+  map(fn: (x: Val | FErr, r: number, c: number) => Val | FErr) {
+    return new Arr(this.rows, this.cols, this.v.map((x, i) => fn(x, Math.floor(i / this.cols), i % this.cols)));
+  }
+}
+export class Lambda {
+  constructor(public params: string[], public body: Node, public env: Env) {}
+}
+export type V = Val | FErr | Arr | Lambda;
+export type Env = Map<string, V>;
 
 export function colName(i: number) {
   let s = "";
   for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s;
   return s;
 }
-
-export function parseRef(ref: string) {
-  const m = /^\$?([A-Z]+)\$?(\d+)$/i.exec(ref);
-  if (!m) return null;
+export function colIndex(letters: string) {
   let c = 0;
-  for (const ch of m[1].toUpperCase()) c = c * 26 + ch.charCodeAt(0) - 64;
-  return { r: Number(m[2]) - 1, c: c - 1 };
+  for (const ch of letters.toUpperCase()) c = c * 26 + ch.charCodeAt(0) - 64;
+  return c - 1;
 }
+export function parseRef(ref: string) {
+  const m = /^\$?([A-Z]{1,3})\$?(\d+)$/i.exec(ref);
+  if (!m) return null;
+  const r = Number(m[2]) - 1, c = colIndex(m[1]);
+  if (r < 0 || c > 16383) return null;
+  return { r, c };
+}
+/** "A1:C9" (or a single cell) to bounds. */
+export function parseRange(s: string) {
+  const [a, b = a] = s.replace(/^.*!/, "").split(":");
+  const p = parseRef(a), q = parseRef(b);
+  if (!p || !q) return null;
+  return { r1: Math.min(p.r, q.r), c1: Math.min(p.c, q.c), r2: Math.max(p.r, q.r), c2: Math.max(p.c, q.c) };
+}
+export const rangeText = (r1: number, c1: number, r2: number, c2: number) => `${colName(c1)}${r1 + 1}` + (r1 !== r2 || c1 !== c2 ? `:${colName(c2)}${r2 + 1}` : "");
 
-type Tok = { t: "num"; v: number } | { t: "str"; v: string } | { t: "ref"; v: string } | { t: "id"; v: string } | { t: "op"; v: string };
+// ---- Tokens ---------------------------------------------------------------------------------------
 
-function tokenize(src: string): Tok[] {
+type Tok =
+  | { t: "num"; v: number }
+  | { t: "str"; v: string }
+  | { t: "err"; v: string }
+  | { t: "ref"; v: string; sheet?: string }
+  | { t: "id"; v: string; sheet?: string }
+  | { t: "op"; v: string };
+
+const ERRORS = ["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!", "#GETTING_DATA"];
+
+export function tokenize(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0;
   while (i < src.length) {
     const ch = src[i];
-    if (/\s/.test(ch)) { i++; continue; }
-    if (/[0-9.]/.test(ch)) {
-      const m = /^\d*\.?\d+(e[+-]?\d+)?/i.exec(src.slice(i))!;
-      if (!m) throw new FErr("#ERROR!");
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (/[0-9]/.test(ch) || (ch === "." && /[0-9]/.test(src[i + 1] ?? ""))) {
+      const m = /^\d*\.?\d+(e[+-]?\d+)?|^\d+\./i.exec(src.slice(i))!;
       out.push({ t: "num", v: Number(m[0]) });
       i += m[0].length;
       continue;
@@ -39,8 +95,10 @@ function tokenize(src: string): Tok[] {
       let s = "";
       i++;
       while (i < src.length) {
-        if (src[i] === '"' && src[i + 1] === '"') { s += '"'; i += 2; }
-        else if (src[i] === '"') break;
+        if (src[i] === '"' && src[i + 1] === '"') {
+          s += '"';
+          i += 2;
+        } else if (src[i] === '"') break;
         else s += src[i++];
       }
       if (src[i] !== '"') throw new FErr("#ERROR!");
@@ -48,31 +106,73 @@ function tokenize(src: string): Tok[] {
       out.push({ t: "str", v: s });
       continue;
     }
-    const word = /^\$?[A-Za-z_][A-Za-z0-9_.]*\$?\d*/.exec(src.slice(i));
+    if (ch === "#") {
+      const e = ERRORS.find((x) => src.slice(i, i + x.length).toUpperCase() === x);
+      if (e) {
+        out.push({ t: "err", v: e });
+        i += e.length;
+        continue;
+      }
+      out.push({ t: "op", v: "#" });
+      i++;
+      continue;
+    }
+    // Sheet prefix: 'My sheet'!A1 or Sheet2!A1.
+    let sheet: string | undefined;
+    if (ch === "'") {
+      const m = /^'((?:[^']|'')+)'!/.exec(src.slice(i));
+      if (m) {
+        sheet = m[1].replace(/''/g, "'");
+        i += m[0].length;
+      }
+    } else {
+      const m = /^([A-Za-z_À-￿][\w.À-￿]*)!/.exec(src.slice(i));
+      if (m) {
+        sheet = m[1];
+        i += m[0].length;
+      }
+    }
+    const word = /^\$?[A-Za-z_\\À-￿][A-Za-z0-9_.À-￿]*(\$?\d+)?/.exec(src.slice(i)) ?? (sheet ? /^\$?\d+/.exec(src.slice(i)) : null);
     if (word) {
       const w = word[0];
-      out.push(parseRef(w) ? { t: "ref", v: w.toUpperCase() } : { t: "id", v: w.toUpperCase() });
+      if (parseRef(w)) out.push({ t: "ref", v: w.toUpperCase(), sheet });
+      else out.push({ t: "id", v: w.toUpperCase(), sheet });
       i += w.length;
       continue;
     }
     const two = src.slice(i, i + 2);
-    if (two === "<=" || two === ">=" || two === "<>") { out.push({ t: "op", v: two }); i += 2; continue; }
-    if ("+-*/^&=<>(),:%".includes(ch)) { out.push({ t: "op", v: ch }); i++; continue; }
+    if (two === "<=" || two === ">=" || two === "<>") {
+      out.push({ t: "op", v: two });
+      i += 2;
+      continue;
+    }
+    if ("+-*/^&=<>(),:%{};@".includes(ch)) {
+      out.push({ t: "op", v: ch });
+      i++;
+      continue;
+    }
     throw new FErr("#ERROR!");
   }
   return out;
 }
 
-type Node =
-  | { k: "lit"; v: Val }
-  | { k: "ref"; r: number; c: number }
-  | { k: "range"; r1: number; c1: number; r2: number; c2: number }
+// ---- Parser -----------------------------------------------------------------------------------------
+
+export type Node =
+  | { k: "lit"; v: Val | FErr }
+  | { k: "ref"; s?: string; r: number; c: number }
+  | { k: "range"; s?: string; r1: number; c1: number; r2: number; c2: number; wholeCol?: boolean; wholeRow?: boolean }
+  | { k: "spill"; s?: string; r: number; c: number }
   | { k: "bin"; op: string; a: Node; b: Node }
   | { k: "neg"; a: Node }
   | { k: "pct"; a: Node }
-  | { k: "call"; name: string; args: Node[] };
+  | { k: "call"; name: string; args: Node[] }
+  | { k: "invoke"; fn: Node; args: Node[] }
+  | { k: "name"; name: string; s?: string }
+  | { k: "arr"; rows: Node[][] }
+  | { k: "omit" };
 
-function parse(src: string): Node {
+export function parse(src: string): Node {
   const toks = tokenize(src);
   let p = 0;
   const peek = () => toks[p];
@@ -89,11 +189,33 @@ function parse(src: string): Node {
     }
     return a;
   };
+  const args = (): Node[] => {
+    const out: Node[] = [];
+    if (isOp(")")) return out;
+    for (;;) {
+      out.push(isOp(",") || isOp(")") ? { k: "omit" } : expr());
+      if (isOp(",")) {
+        p++;
+        continue;
+      }
+      break;
+    }
+    return out;
+  };
   const primary = (): Node => {
     const t = toks[p++];
     if (!t) throw new FErr("#ERROR!");
-    if (t.t === "num") return { k: "lit", v: t.v };
+    if (t.t === "num") {
+      // Row range: 1:5.
+      if (isOp(":") && toks[p + 1]?.t === "num" && Number.isInteger(t.v)) {
+        p++;
+        const b = toks[p++] as { v: number };
+        return { k: "range", r1: Math.min(t.v, b.v) - 1, c1: 0, r2: Math.max(t.v, b.v) - 1, c2: 16383, wholeRow: true };
+      }
+      return { k: "lit", v: t.v };
+    }
     if (t.t === "str") return { k: "lit", v: t.v };
+    if (t.t === "err") return { k: "lit", v: new FErr(t.v) };
     if (t.t === "ref") {
       const a = parseRef(t.v)!;
       if (isOp(":")) {
@@ -101,36 +223,90 @@ function parse(src: string): Node {
         const t2 = toks[p++];
         const b = t2?.t === "ref" ? parseRef(String(t2.v)) : null;
         if (!b) throw new FErr("#REF!");
-        return { k: "range", r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
+        return { k: "range", s: t.sheet, r1: Math.min(a.r, b.r), c1: Math.min(a.c, b.c), r2: Math.max(a.r, b.r), c2: Math.max(a.c, b.c) };
       }
-      return { k: "ref", ...a };
+      if (isOp("#")) {
+        p++;
+        return { k: "spill", s: t.sheet, ...a };
+      }
+      return { k: "ref", s: t.sheet, ...a };
     }
     if (t.t === "id") {
-      if (t.v === "TRUE" || t.v === "FALSE") return { k: "lit", v: t.v === "TRUE" };
-      expect("(");
-      const args: Node[] = [];
-      if (!isOp(")")) {
-        do args.push(expr());
-        while (isOp(",") && ++p);
+      const bare = t.v.replace(/\$/g, "");
+      // Column range: A:C.
+      if (/^[A-Z]{1,3}$/.test(bare) && isOp(":") && toks[p + 1]?.t === "id" && /^\$?[A-Z]{1,3}$/.test(String(toks[p + 1].v))) {
+        p++;
+        const b = colIndex(String(toks[p++].v).replace(/\$/g, ""));
+        const a = colIndex(bare);
+        return { k: "range", s: t.sheet, r1: 0, c1: Math.min(a, b), r2: 1048575, c2: Math.max(a, b), wholeCol: true };
       }
-      expect(")");
-      return { k: "call", name: t.v, args };
+      if (t.v === "TRUE" || t.v === "FALSE") {
+        if (isOp("(")) {
+          p += 1;
+          expect(")");
+        }
+        return { k: "lit", v: t.v === "TRUE" };
+      }
+      if (isOp("(")) {
+        p++;
+        const a = args();
+        expect(")");
+        let node: Node = { k: "call", name: t.v.replace(/^_XLFN\.|^_XLWS\./, ""), args: a };
+        while (isOp("(")) {
+          p++;
+          const b = args();
+          expect(")");
+          node = { k: "invoke", fn: node, args: b };
+        }
+        return node;
+      }
+      return { k: "name", name: t.v, s: t.sheet };
     }
     if (t.v === "(") {
       const e = expr();
       expect(")");
-      return e;
+      let node = e;
+      while (isOp("(")) {
+        p++;
+        const b = args();
+        expect(")");
+        node = { k: "invoke", fn: node, args: b };
+      }
+      return node;
     }
+    if (t.v === "{") {
+      const rows: Node[][] = [[]];
+      for (;;) {
+        rows[rows.length - 1].push(unary());
+        if (isOp(",")) p++;
+        else if (isOp(";")) {
+          p++;
+          rows.push([]);
+        } else break;
+      }
+      expect("}");
+      return { k: "arr", rows };
+    }
+    if (t.v === "@") return primary();
     throw new FErr("#ERROR!");
   };
   const postfix = (): Node => {
     let a = primary();
-    while (isOp("%")) { p++; a = { k: "pct", a }; }
+    while (isOp("%")) {
+      p++;
+      a = { k: "pct", a };
+    }
     return a;
   };
   const unary = (): Node => {
-    if (isOp("-")) { p++; return { k: "neg", a: unary() }; }
-    if (isOp("+")) { p++; return unary(); }
+    if (isOp("-")) {
+      p++;
+      return { k: "neg", a: unary() };
+    }
+    if (isOp("+")) {
+      p++;
+      return unary();
+    }
     return postfix();
   };
   const power = binary(unary, ["^"]);
@@ -143,177 +319,347 @@ function parse(src: string): Node {
   return root;
 }
 
-const num = (v: Val): number => {
+// ---- Coercion ------------------------------------------------------------------------------------------
+
+export const num = (v: Val | FErr): number => {
+  if (v instanceof FErr) throw v;
   if (typeof v === "number") return v;
   if (typeof v === "boolean") return v ? 1 : 0;
   if (v.trim() === "") return 0;
-  const n = Number(v);
-  if (isNaN(n)) throw new FErr("#VALUE!");
-  return n;
+  const typed = parseInput(v);
+  if (typeof typed.value === "number") return typed.value;
+  throw new FErr("#VALUE!");
 };
-const str = (v: Val) => (typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : String(v));
-const truthy = (v: Val) => (typeof v === "string" ? v !== "" && v.toUpperCase() !== "FALSE" : !!num(v));
-const nums = (vs: Val[]) => vs.filter((v): v is number => typeof v === "number");
+export const str = (v: Val | FErr): string => {
+  if (v instanceof FErr) throw v;
+  return typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : typeof v === "number" ? displayNumber(v) : v;
+};
+export const bool = (v: Val | FErr): boolean => {
+  if (v instanceof FErr) throw v;
+  if (typeof v === "string") {
+    const u = v.toUpperCase();
+    if (u === "TRUE") return true;
+    if (u === "FALSE" || u === "") return false;
+    throw new FErr("#VALUE!");
+  }
+  return !!num(v);
+};
+const displayNumber = (v: number) => (Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(15))));
 
-function criteria(c: Val): (v: Val) => boolean {
-  const m = /^(<=|>=|<>|<|>|=)?(.*)$/.exec(str(c))!;
-  const op = m[1] ?? "=";
-  const target = m[2];
-  const tn = Number(target);
-  return (v) => {
-    const isNum = target !== "" && !isNaN(tn) && typeof v !== "string";
-    const a = isNum ? num(v) : str(v).toLowerCase();
-    const b = isNum ? tn : target.toLowerCase();
-    switch (op) {
-      case "<": return a < b;
-      case ">": return a > b;
-      case "<=": return a <= b;
-      case ">=": return a >= b;
-      case "<>": return a !== b;
-      default: return a === b;
-    }
-  };
+// ---- The workbook evaluator ---------------------------------------------------------------------------------
+
+export interface BookSource {
+  sheets: { name: string; cells: string[][] }[];
+  names?: Record<string, string>;
 }
 
-export function makeEvaluator(cells: string[][]) {
-  const cache = new Map<string, Val | FErr>();
-  const visiting = new Set<string>();
-  const parsed = new Map<string, Node | FErr>();
+export interface Ctx {
+  book: Book;
+  sheet: number;
+  /** The cell being calculated. */
+  r: number;
+  c: number;
+  env: Env;
+  evaluate: (n: Node, env?: Env) => V;
+  callLambda: (f: Lambda, args: V[]) => V;
+}
 
-  function value(r: number, c: number): Val | FErr {
-    const key = r + "," + c;
+const ARRAY_HINT = /[A-Z$]+\d*:[$A-Z]+\d*|\{|#\s*$|FILTER|SORT|UNIQUE|SEQUENCE|RANDARRAY|TRANSPOSE|STACK|TAKE|DROP|CHOOSE(ROWS|COLS)|TO(ROW|COL)|WRAP(ROWS|COLS)|EXPAND|TEXTSPLIT|MMULT|MINVERSE|MAKEARRAY|BYROW|BYCOL|MAP|SCAN|FREQUENCY|MODE\.MULT|LINEST|TREND|GROWTH/i;
+
+export class Book {
+  private cache: Map<string, Val | FErr>[] = [];
+  private arrays: Map<string, Arr>[] = [];
+  /** Cells filled by a neighbouring formula's spilled array: key → [source row, source col, value]. */
+  private spills: Map<string, [number, number, Val | FErr]>[] = [];
+  private spillReady: boolean[] = [];
+  private visiting = new Set<string>();
+  private parsed = new Map<string, Node | FErr>();
+  constructor(public src: BookSource) {}
+
+  sheetIndex(name?: string, from = 0) {
+    if (!name) return from;
+    return this.src.sheets.findIndex((s) => s.name.toLowerCase() === name.toLowerCase());
+  }
+  raw(s: number, r: number, c: number) {
+    return this.src.sheets[s]?.cells[r]?.[c] ?? "";
+  }
+  used(s: number) {
+    const cells = this.src.sheets[s]?.cells ?? [];
+    return { rows: cells.length, cols: Math.max(0, ...cells.map((r) => r?.length ?? 0)) };
+  }
+  ast(raw: string): Node | FErr {
+    let a = this.parsed.get(raw);
+    if (!a) {
+      try {
+        a = parse(raw.slice(1));
+      } catch (e) {
+        a = e instanceof FErr ? e : new FErr("#ERROR!");
+      }
+      this.parsed.set(raw, a);
+    }
+    return a;
+  }
+
+  /** The value shown in a cell. */
+  value(s: number, r: number, c: number): Val | FErr {
+    const key = `${r},${c}`;
+    const cache = (this.cache[s] ??= new Map());
     const hit = cache.get(key);
     if (hit !== undefined) return hit;
-    const raw = cells[r]?.[c] ?? "";
+    const raw = this.raw(s, r, c);
     let v: Val | FErr;
     if (raw.startsWith("=") && raw.length > 1) {
-      if (visiting.has(key)) return new FErr("#CYCLE!");
-      visiting.add(key);
+      const vk = `${s}:${key}`;
+      if (this.visiting.has(vk)) return new FErr("#CYCLE!");
+      this.visiting.add(vk);
       try {
-        let ast = parsed.get(raw);
-        if (!ast) {
-          try { ast = parse(raw.slice(1)); } catch (e) { ast = e instanceof FErr ? e : new FErr("#ERROR!"); }
-          parsed.set(raw, ast);
-        }
+        const ast = this.ast(raw);
         if (ast instanceof FErr) throw ast;
-        v = scalar(evaluate(ast));
+        let out = this.run(ast, s, r, c);
+        if (out instanceof Lambda) out = new FErr("#CALC!");
+        if (out instanceof Arr) {
+          if (out.rows * out.cols === 1) v = out.v[0];
+          else v = this.spill(s, r, c, out);
+        } else v = out;
+        if (v === "" && ast.k === "ref") v = 0;
         if (typeof v === "number" && !isFinite(v)) v = new FErr("#NUM!");
       } catch (e) {
         v = e instanceof FErr ? e : new FErr("#ERROR!");
       }
-      visiting.delete(key);
-    } else if (raw.trim() !== "" && !isNaN(Number(raw))) v = Number(raw);
-    else v = raw;
+      this.visiting.delete(vk);
+    } else if (raw === "") {
+      this.ensureSpills(s);
+      const sp = this.spills[s]?.get(key);
+      v = sp ? sp[2] : "";
+    } else v = parseInput(raw).value;
     cache.set(key, v);
     return v;
   }
 
-  const get = (r: number, c: number): Val => {
-    const v = value(r, c);
-    if (v instanceof FErr) throw v;
-    return v;
-  };
+  /** Where a spilled value came from, for drawing the spill border. */
+  spillSource(s: number, r: number, c: number) {
+    this.ensureSpills(s);
+    const sp = this.spills[s]?.get(`${r},${c}`);
+    return sp ? { r: sp[0], c: sp[1] } : null;
+  }
+  spillArray(s: number, r: number, c: number) {
+    this.value(s, r, c);
+    return this.arrays[s]?.get(`${r},${c}`) ?? null;
+  }
 
-  const scalar = (v: Val | Val[]): Val => (Array.isArray(v) ? v[0] ?? "" : v);
+  private spill(s: number, r: number, c: number, a: Arr): Val | FErr {
+    const map = (this.spills[s] ??= new Map());
+    for (let i = 0; i < a.rows; i++)
+      for (let j = 0; j < a.cols; j++) {
+        if (!i && !j) continue;
+        const k = `${r + i},${c + j}`;
+        const other = map.get(k);
+        if (this.raw(s, r + i, c + j) !== "" || (other && (other[0] !== r || other[1] !== c))) return new FErr("#SPILL!");
+      }
+    for (let i = 0; i < a.rows; i++)
+      for (let j = 0; j < a.cols; j++) {
+        if (!i && !j) continue;
+        const k = `${r + i},${c + j}`;
+        map.set(k, [r, c, a.v[i * a.cols + j]]);
+        this.cache[s]?.delete(k);
+      }
+    (this.arrays[s] ??= new Map()).set(`${r},${c}`, a);
+    return a.v[0];
+  }
 
-  function evaluate(n: Node): Val | Val[] {
+  /** Calculate the formulas that may spill, so empty cells know whether they're covered. */
+  private ensureSpills(s: number) {
+    if (this.spillReady[s]) return;
+    this.spillReady[s] = true;
+    const cells = this.src.sheets[s]?.cells ?? [];
+    cells.forEach((row, r) =>
+      row?.forEach((raw, c) => {
+        if (raw?.startsWith("=") && ARRAY_HINT.test(raw)) this.value(s, r, c);
+      }),
+    );
+  }
+
+  /** Calculate a formula as if it were in cell (r, c) of sheet s, without storing it. */
+  formula(s: number, text: string, r: number, c: number): Val | FErr {
+    const ast = this.ast(text.startsWith("=") ? text : "=" + text);
+    if (ast instanceof FErr) return ast;
+    try {
+      return scalarOf(this.run(ast, s, r, c));
+    } catch (e) {
+      return e instanceof FErr ? e : new FErr("#ERROR!");
+    }
+  }
+
+  private run(ast: Node, s: number, r: number, c: number): V {
+    const ctx: Ctx = {
+      book: this,
+      sheet: s,
+      r,
+      c,
+      env: new Map(),
+      evaluate: (n, env) => this.evaluate(n, { ...ctx, env: env ?? ctx.env }),
+      callLambda: (f, args) => {
+        const env: Env = new Map(f.env);
+        f.params.forEach((p, i) => env.set(p, args[i] ?? new FErr("#VALUE!")));
+        return this.evaluate(f.body, { ...ctx, env });
+      },
+    };
+    return this.evaluate(ast, ctx);
+  }
+
+  private cellOrErr(s: number, r: number, c: number): Val | FErr {
+    if (s < 0) return new FErr("#REF!");
+    return this.value(s, r, c);
+  }
+
+  rangeArr(s: number, r1: number, c1: number, r2: number, c2: number): Arr {
+    if (s < 0) throw new FErr("#REF!");
+    const u = this.used(s);
+    // Whole columns and rows stop at the used area.
+    r2 = Math.min(r2, Math.max(r1, u.rows - 1));
+    c2 = Math.min(c2, Math.max(c1, u.cols - 1));
+    const rows = r2 - r1 + 1, cols = c2 - c1 + 1;
+    const v: (Val | FErr)[] = new Array(rows * cols);
+    for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) v[i * cols + j] = this.value(s, r1 + i, c1 + j);
+    return new Arr(rows, cols, v);
+  }
+
+  /** Resolve a named range or LET/LAMBDA name. */
+  private resolveName(name: string, ctx: Ctx): V {
+    if (ctx.env.has(name)) return ctx.env.get(name)!;
+    const def = this.src.names?.[name] ?? Object.entries(this.src.names ?? {}).find(([k]) => k.toUpperCase() === name)?.[1];
+    if (def === undefined) throw new FErr("#NAME?");
+    const ast = this.ast(def.startsWith("=") ? def : "=" + def);
+    if (ast instanceof FErr) throw ast;
+    return this.evaluate(ast, ctx);
+  }
+
+  evaluate(n: Node, ctx: Ctx): V {
     switch (n.k) {
-      case "lit": return n.v;
-      case "ref": return get(n.r, n.c);
-      case "range": {
-        const out: Val[] = [];
-        for (let r = n.r1; r <= n.r2; r++) for (let c = n.c1; c <= n.c2; c++) out.push(get(r, c));
-        return out;
+      case "lit":
+        return n.v;
+      case "omit":
+        return "";
+      case "ref":
+        return this.cellOrErr(this.sheetIndex(n.s, ctx.sheet), n.r, n.c);
+      case "range":
+        return this.rangeArr(this.sheetIndex(n.s, ctx.sheet), n.r1, n.c1, n.r2, n.c2);
+      case "spill": {
+        const s = this.sheetIndex(n.s, ctx.sheet);
+        const a = this.spillArray(s, n.r, n.c);
+        return a ?? this.cellOrErr(s, n.r, n.c);
       }
-      case "neg": return -num(scalar(evaluate(n.a)));
-      case "pct": return num(scalar(evaluate(n.a))) / 100;
-      case "bin": {
-        const a = scalar(evaluate(n.a));
-        const b = scalar(evaluate(n.b));
-        switch (n.op) {
-          case "+": return num(a) + num(b);
-          case "-": return num(a) - num(b);
-          case "*": return num(a) * num(b);
-          case "/": if (num(b) === 0) throw new FErr("#DIV/0!"); return num(a) / num(b);
-          case "^": return Math.pow(num(a), num(b));
-          case "&": return str(a) + str(b);
+      case "name":
+        return this.resolveName(n.name, ctx);
+      case "arr":
+        return Arr.of(n.rows.map((row) => row.map((x) => scalarOf(this.evaluate(x, ctx)))));
+      case "neg":
+        return lift1(this.evaluate(n.a, ctx), (x) => -num(x));
+      case "pct":
+        return lift1(this.evaluate(n.a, ctx), (x) => num(x) / 100);
+      case "bin":
+        return lift2(this.evaluate(n.a, ctx), this.evaluate(n.b, ctx), (a, b) => binop(n.op, a, b));
+      case "call": {
+        const lam = ctx.env.get(n.name);
+        if (lam instanceof Lambda) return ctx.callLambda(lam, n.args.map((a) => this.evaluate(a, ctx)));
+        const fn = FUNCTIONS[n.name];
+        if (!fn) {
+          // A named LAMBDA defined in the Name Manager.
+          const named = this.src.names && Object.keys(this.src.names).find((k) => k.toUpperCase() === n.name);
+          if (named) {
+            const f = this.resolveName(n.name, ctx);
+            if (f instanceof Lambda) return ctx.callLambda(f, n.args.map((a) => this.evaluate(a, ctx)));
+          }
+          throw new FErr("#NAME?");
         }
-        const bothNum = typeof a !== "string" && typeof b !== "string";
-        const x = bothNum ? num(a) : str(a).toLowerCase();
-        const y = bothNum ? num(b) : str(b).toLowerCase();
-        switch (n.op) {
-          case "=": return x === y;
-          case "<>": return x !== y;
-          case "<": return x < y;
-          case ">": return x > y;
-          case "<=": return x <= y;
-          default: return x >= y;
-        }
+        return fn(n.args, ctx);
       }
-      case "call": return call(n.name, n.args);
+      case "invoke": {
+        const f = this.evaluate(n.fn, ctx);
+        if (!(f instanceof Lambda)) throw new FErr("#VALUE!");
+        return ctx.callLambda(f, n.args.map((a) => this.evaluate(a, ctx)));
+      }
     }
   }
+}
 
-  function call(name: string, args: Node[]): Val | Val[] {
-    const flat = () => args.flatMap((a) => { const v = evaluate(a); return Array.isArray(v) ? v : [v]; });
-    const arg = (i: number) => scalar(evaluate(args[i] ?? { k: "lit", v: "" }));
-    const numArgs = () => args.flatMap((a) => {
-      const v = evaluate(a);
-      return Array.isArray(v) ? nums(v) : [num(v)];
-    });
-    switch (name) {
-      case "SUM": return numArgs().reduce((s, x) => s + x, 0);
-      case "AVERAGE": case "AVG": {
-        const xs = numArgs();
-        if (!xs.length) throw new FErr("#DIV/0!");
-        return xs.reduce((s, x) => s + x, 0) / xs.length;
-      }
-      case "MIN": { const xs = numArgs(); return xs.length ? Math.min(...xs) : 0; }
-      case "MAX": { const xs = numArgs(); return xs.length ? Math.max(...xs) : 0; }
-      case "COUNT": return nums(flat()).length;
-      case "COUNTA": return flat().filter((v) => v !== "").length;
-      case "PRODUCT": return numArgs().reduce((s, x) => s * x, 1);
-      case "IF": return truthy(arg(0)) ? arg(1) : args.length > 2 ? arg(2) : false;
-      case "IFERROR":
-        try { return arg(0); } catch (e) { if (e instanceof FErr) return arg(1); throw e; }
-      case "AND": return flat().every(truthy);
-      case "OR": return flat().some(truthy);
-      case "NOT": return !truthy(arg(0));
-      case "ROUND": { const f = Math.pow(10, num(arg(1))); return Math.round(num(arg(0)) * f) / f; }
-      case "FLOOR": return Math.floor(num(arg(0)));
-      case "CEILING": return Math.ceil(num(arg(0)));
-      case "ABS": return Math.abs(num(arg(0)));
-      case "SQRT": { const x = num(arg(0)); if (x < 0) throw new FErr("#NUM!"); return Math.sqrt(x); }
-      case "POWER": return Math.pow(num(arg(0)), num(arg(1)));
-      case "MOD": { const d = num(arg(1)); if (d === 0) throw new FErr("#DIV/0!"); return num(arg(0)) % d; }
-      case "CONCAT": case "CONCATENATE": return flat().map(str).join("");
-      case "LEN": return str(arg(0)).length;
-      case "UPPER": return str(arg(0)).toUpperCase();
-      case "LOWER": return str(arg(0)).toLowerCase();
-      case "TRIM": return str(arg(0)).trim().replace(/\s+/g, " ");
-      case "LEFT": return str(arg(0)).slice(0, args.length > 1 ? num(arg(1)) : 1);
-      case "RIGHT": { const s = str(arg(0)); const n = args.length > 1 ? num(arg(1)) : 1; return n ? s.slice(-n) : ""; }
-      case "MID": return str(arg(0)).substr(num(arg(1)) - 1, num(arg(2)));
-      case "TODAY": return new Date().toISOString().slice(0, 10);
-      case "NOW": return new Date().toLocaleString();
-      case "COUNTIF": {
-        const test = criteria(arg(1));
-        const v = evaluate(args[0]);
-        return (Array.isArray(v) ? v : [v]).filter(test).length;
-      }
-      case "SUMIF": {
-        const test = criteria(arg(1));
-        const range = evaluate(args[0]);
-        const r = Array.isArray(range) ? range : [range];
-        const sumV = args[2] ? evaluate(args[2]) : r;
-        const s = Array.isArray(sumV) ? sumV : [sumV];
-        return r.reduce<number>((acc, v, i) => (test(v) && typeof s[i] === "number" ? acc + (s[i] as number) : acc), 0);
-      }
-      default: throw new FErr("#NAME?");
-    }
+export const scalarOf = (v: V): Val | FErr => (v instanceof Arr ? v.v[0] ?? "" : v instanceof Lambda ? new FErr("#CALC!") : v);
+
+function lift1(a: V, fn: (x: Val | FErr) => Val | FErr): V {
+  if (a instanceof Arr) return a.map((x) => safe(() => fn(x)));
+  return fn(scalarOf(a));
+}
+function lift2(a: V, b: V, fn: (x: Val | FErr, y: Val | FErr) => Val | FErr): V {
+  if (a instanceof Arr || b instanceof Arr) {
+    const A = a instanceof Arr ? a : new Arr(1, 1, [scalarOf(a)]);
+    const B = b instanceof Arr ? b : new Arr(1, 1, [scalarOf(b)]);
+    const rows = Math.max(A.rows, B.rows), cols = Math.max(A.cols, B.cols);
+    const v: (Val | FErr)[] = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) v.push(safe(() => fn(A.at(r, c), B.at(r, c))));
+    return new Arr(rows, cols, v);
   }
+  return fn(scalarOf(a), scalarOf(b));
+}
+export function safe(fn: () => Val | FErr): Val | FErr {
+  try {
+    return fn();
+  } catch (e) {
+    return e instanceof FErr ? e : new FErr("#VALUE!");
+  }
+}
 
-  return value;
+function binop(op: string, a: Val | FErr, b: Val | FErr): Val | FErr {
+  if (a instanceof FErr) return a;
+  if (b instanceof FErr) return b;
+  switch (op) {
+    case "+":
+      return num(a) + num(b);
+    case "-":
+      return num(a) - num(b);
+    case "*":
+      return num(a) * num(b);
+    case "/":
+      if (num(b) === 0) return new FErr("#DIV/0!");
+      return num(a) / num(b);
+    case "^":
+      return Math.pow(num(a), num(b));
+    case "&":
+      return str(a) + str(b);
+  }
+  return compare(op, a, b);
+}
+
+/** Excel comparison: numbers < text < booleans, text case-insensitive. */
+export function compareVals(a: Val, b: Val): number {
+  const rank = (v: Val) => (typeof v === "number" ? 0 : typeof v === "string" ? 1 : 2);
+  if (a === "" && typeof b === "number") a = 0;
+  if (b === "" && typeof a === "number") b = 0;
+  if (rank(a) !== rank(b)) return rank(a) - rank(b);
+  if (typeof a === "string") return a.toLowerCase().localeCompare((b as string).toLowerCase());
+  return Number(a) - Number(b);
+}
+function compare(op: string, a: Val, b: Val): boolean {
+  const d = compareVals(a, b);
+  switch (op) {
+    case "=":
+      return d === 0;
+    case "<>":
+      return d !== 0;
+    case "<":
+      return d < 0;
+    case ">":
+      return d > 0;
+    case "<=":
+      return d <= 0;
+    default:
+      return d >= 0;
+  }
+}
+
+/** A single-sheet evaluator, for callers that only need one sheet. */
+export function makeEvaluator(cells: string[][], book?: BookSource, sheet = 0) {
+  const b = new Book(book ?? { sheets: [{ name: "Sheet1", cells }] });
+  return (r: number, c: number) => b.value(sheet, r, c);
 }
 
 export function display(v: Val | FErr): string {
