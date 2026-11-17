@@ -10,12 +10,12 @@ import { emptyDeck } from "../apps/slides/types";
 
 export const ACCEPT: Record<Kind | "all", string> = {
   docs: ".docx,.html,.htm,.txt,.md",
-  sheets: ".csv,.tsv,.xlsx,.xls,.ods",
+  sheets: ".csv,.tsv,.xlsx,.xlsm,.xls,.ods",
   slides: ".pptx,.ppsx,.potx,.pptm",
   forms: ".json",
   pdf: ".pdf",
   tracker: ".json",
-  all: ".pdf,.csv,.tsv,.xlsx,.xls,.ods,.docx,.pptx,.ppsx,.potx,.pptm,.html,.htm,.txt,.md,.json",
+  all: ".pdf,.csv,.tsv,.xlsx,.xlsm,.xls,.ods,.docx,.pptx,.ppsx,.potx,.pptm,.html,.htm,.txt,.md,.json",
 };
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -83,7 +83,18 @@ export async function importFile(file: File): Promise<{ kind: Kind; id: string }
     const data: SheetsData = { sheets: [{ name, cells: csvToCells(await file.text()) }] };
     return { kind: "sheets", id: await createFile("sheets", name, data) };
   }
-  if (ext === "xlsx" || ext === "xls" || ext === "ods") {
+  if (ext === "xlsx" || ext === "xlsm") {
+    // ExcelJS keeps the formatting; fall back to SheetJS for files it can't read.
+    const buf = await file.arrayBuffer();
+    try {
+      const { readXlsx } = await import("../apps/sheets/xlsx");
+      return { kind: "sheets", id: await createFile("sheets", name, await readXlsx(buf)) };
+    } catch {
+      const sheets = await workbookToSheets(buf);
+      return { kind: "sheets", id: await createFile("sheets", name, { sheets } satisfies SheetsData) };
+    }
+  }
+  if (ext === "xls" || ext === "ods") {
     const sheets = await workbookToSheets(await file.arrayBuffer());
     return { kind: "sheets", id: await createFile("sheets", name, { sheets } satisfies SheetsData) };
   }
