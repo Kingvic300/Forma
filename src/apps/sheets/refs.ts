@@ -29,9 +29,10 @@ export function transformRefs(formula: string, fn: (ref: RefPart) => string | nu
   if (!formula.startsWith("=")) return formula;
   let out = "";
   let i = 0;
-  const parts = formula.split(/("(?:[^"]|"")*")/);
+  // String literals and structured references ([@Q1] is a column name, not cell Q1) are left alone.
+  const parts = formula.split(/("(?:[^"]|"")*"|\[(?:[^[\]']|'.|\[(?:[^[\]']|'.)*\])*\])/);
   for (const part of parts) {
-    if (part.startsWith('"')) {
+    if (part.startsWith('"') || part.startsWith("[")) {
       out += part;
       continue;
     }

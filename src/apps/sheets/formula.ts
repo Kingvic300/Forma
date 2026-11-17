@@ -72,7 +72,25 @@ type Tok =
   | { t: "err"; v: string }
   | { t: "ref"; v: string; sheet?: string }
   | { t: "id"; v: string; sheet?: string }
+  | { t: "sref"; v: string; table: string; spec: string }
   | { t: "op"; v: string };
+
+/** Read a balanced [...] group starting at src[i] === "[", honouring Excel's ' escapes. Returns the inner text and the index after it. */
+function bracket(src: string, i: number): [string, number] {
+  let depth = 0;
+  let j = i;
+  for (; j < src.length; j++) {
+    const ch = src[j];
+    if (ch === "'") {
+      j++;
+      continue;
+    }
+    if (ch === "[") depth++;
+    else if (ch === "]" && --depth === 0) break;
+  }
+  if (depth !== 0) throw new FErr("#ERROR!");
+  return [src.slice(i + 1, j), j + 1];
+}
 
 const ERRORS = ["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#SPILL!", "#CALC!", "#GETTING_DATA"];
 
@@ -132,9 +150,23 @@ export function tokenize(src: string): Tok[] {
         i += m[0].length;
       }
     }
+    // Structured reference inside a table, without the table's name: [@Amount].
+    if (ch === "[" && !sheet) {
+      const [spec, next] = bracket(src, i);
+      out.push({ t: "sref", v: "", table: "", spec });
+      i = next;
+      continue;
+    }
     const word = /^\$?[A-Za-z_\\À-￿][A-Za-z0-9_.À-￿]*(\$?\d+)?/.exec(src.slice(i)) ?? (sheet ? /^\$?\d+/.exec(src.slice(i)) : null);
     if (word) {
       const w = word[0];
+      // Table reference: Sales[Amount], Sales[[#Totals],[Amount]].
+      if (src[i + w.length] === "[" && !w.includes("$")) {
+        const [spec, next] = bracket(src, i + w.length);
+        out.push({ t: "sref", v: w, table: w, spec });
+        i = next;
+        continue;
+      }
       if (parseRef(w)) out.push({ t: "ref", v: w.toUpperCase(), sheet });
       else out.push({ t: "id", v: w.toUpperCase(), sheet });
       i += w.length;
@@ -169,6 +201,7 @@ export type Node =
   | { k: "call"; name: string; args: Node[] }
   | { k: "invoke"; fn: Node; args: Node[] }
   | { k: "name"; name: string; s?: string }
+  | { k: "sref"; table: string; spec: string }
   | { k: "arr"; rows: Node[][] }
   | { k: "omit" };
 
@@ -216,6 +249,7 @@ export function parse(src: string): Node {
     }
     if (t.t === "str") return { k: "lit", v: t.v };
     if (t.t === "err") return { k: "lit", v: new FErr(t.v) };
+    if (t.t === "sref") return { k: "sref", table: t.table, spec: t.spec };
     if (t.t === "ref") {
       const a = parseRef(t.v)!;
       if (isOp(":")) {
@@ -348,8 +382,18 @@ const displayNumber = (v: number) => (Number.isInteger(v) ? String(v) : String(N
 
 // ---- The workbook evaluator ---------------------------------------------------------------------------------
 
+export interface TableDef {
+  name: string;
+  r1: number;
+  c1: number;
+  r2: number;
+  c2: number;
+  header?: boolean;
+  totals?: boolean;
+}
+
 export interface BookSource {
-  sheets: { name: string; cells: string[][] }[];
+  sheets: { name: string; cells: string[][]; tables?: TableDef[] }[];
   names?: Record<string, string>;
 }
 
@@ -362,6 +406,89 @@ export interface Ctx {
   env: Env;
   evaluate: (n: Node, env?: Env) => V;
   callLambda: (f: Lambda, args: V[]) => V;
+}
+
+// ---- Structured references ---------------------------------------------------------------------------
+
+/** Excel escapes [ ] # ' in column names with a leading apostrophe. */
+export const escapeColumn = (name: string) => name.replace(/([[\]#'])/g, "'$1");
+const unescapeColumn = (name: string) => name.replace(/'(.)/g, "$1");
+
+/** Split "[#Headers],[Amount]" at top-level commas. */
+function splitSpec(spec: string): string[] {
+  const out: string[] = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < spec.length; i++) {
+    const ch = spec[i];
+    if (ch === "'") i++;
+    else if (ch === "[") depth++;
+    else if (ch === "]") depth--;
+    else if (ch === "," && depth === 0) {
+      out.push(spec.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(spec.slice(start));
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+const strip = (x: string) => (x.startsWith("[") && x.endsWith("]") ? x.slice(1, -1) : x);
+
+/**
+ * The cells a structured reference points at. `row` is the row of the formula, for [@Col].
+ * Supports [Col], [[Col1]:[Col2]], [#All], [#Data], [#Headers], [#Totals], [#This Row] and @.
+ */
+export function resolveStructured(t: TableDef, spec: string, headers: string[], row: number): { r1: number; c1: number; r2: number; c2: number; thisRow: boolean } | FErr {
+  const hdr = t.header === false ? -1 : t.r1;
+  const d1 = hdr >= 0 ? t.r1 + 1 : t.r1;
+  const tot = t.totals ? t.r2 : -1;
+  const d2 = Math.max(d1, t.totals ? t.r2 - 1 : t.r2);
+  const items = new Set<string>();
+  const cols: string[] = [];
+  let thisRow = false;
+  let s = spec.trim();
+  if (s.startsWith("@")) {
+    thisRow = true;
+    s = s.slice(1).trim();
+    if (s) cols.push(unescapeColumn(strip(s)));
+  } else {
+    for (const part of splitSpec(s)) {
+      const range = /^\[(.*)\]\s*:\s*\[(.*)\]$/.exec(part);
+      if (range) {
+        cols.push(unescapeColumn(range[1]), unescapeColumn(range[2]));
+        continue;
+      }
+      const inner = strip(part).trim();
+      if (inner.startsWith("#")) {
+        const it = inner.toLowerCase().replace(/\s+/g, " ");
+        if (it === "#this row") thisRow = true;
+        else items.add(it);
+      } else if (inner.startsWith("@")) {
+        thisRow = true;
+        if (inner.slice(1).trim()) cols.push(unescapeColumn(strip(inner.slice(1).trim())));
+      } else cols.push(unescapeColumn(inner));
+    }
+  }
+  const find = (n: string) => headers.findIndex((h) => h.toUpperCase() === n.trim().toUpperCase());
+  let c1 = t.c1, c2 = t.c2;
+  if (cols.length) {
+    const a = find(cols[0]), b = find(cols[cols.length - 1]);
+    if (a < 0 || b < 0) return new FErr("#REF!");
+    c1 = t.c1 + Math.min(a, b);
+    c2 = t.c1 + Math.max(a, b);
+  }
+  if (thisRow) {
+    if (row < d1 || row > d2) return new FErr("#VALUE!");
+    return { r1: row, c1, r2: row, c2, thisRow };
+  }
+  let r1 = d1, r2 = d2;
+  if (items.has("#all")) [r1, r2] = [t.r1, t.r2];
+  else if (items.size) {
+    const want = [items.has("#headers") ? hdr : -1, items.has("#data") ? d1 : -1, items.has("#data") ? d2 : -1, items.has("#totals") ? tot : -1].filter((x) => x >= 0);
+    if (!want.length) return new FErr("#REF!");
+    r1 = Math.min(...want);
+    r2 = Math.max(...want);
+  }
+  return { r1, c1, r2, c2, thisRow: false };
 }
 
 const ARRAY_HINT = /[A-Z$]+\d*:[$A-Z]+\d*|\{|#\s*$|FILTER|SORT|UNIQUE|SEQUENCE|RANDARRAY|TRANSPOSE|STACK|TAKE|DROP|CHOOSE(ROWS|COLS)|TO(ROW|COL)|WRAP(ROWS|COLS)|EXPAND|TEXTSPLIT|MMULT|MINVERSE|MAKEARRAY|BYROW|BYCOL|MAP|SCAN|FREQUENCY|MODE\.MULT|LINEST|TREND|GROWTH/i;
@@ -524,9 +651,36 @@ export class Book {
     return new Arr(rows, cols, v);
   }
 
+  /** A table by name, or the table holding (s, r, c) when no name is given. */
+  findTable(name: string, s?: number, r?: number, c?: number): { s: number; t: TableDef } | null {
+    for (let i = 0; i < this.src.sheets.length; i++)
+      for (const t of this.src.sheets[i].tables ?? []) {
+        if (name ? t.name.toUpperCase() === name.toUpperCase() : i === s && r! >= t.r1 && r! <= t.r2 && c! >= t.c1 && c! <= t.c2) return { s: i, t };
+      }
+    return null;
+  }
+  /** Column names of a table, from its header row. */
+  tableHeaders(s: number, t: TableDef): string[] {
+    return Array.from({ length: t.c2 - t.c1 + 1 }, (_, j) => {
+      if (t.header === false) return `Column${j + 1}`;
+      const v = this.value(s, t.r1, t.c1 + j);
+      return v instanceof FErr ? "" : str(v);
+    });
+  }
+  private structured(table: string, spec: string, ctx: Ctx): V {
+    const hit = this.findTable(table, ctx.sheet, ctx.r, ctx.c);
+    if (!hit) throw new FErr("#REF!");
+    const box = resolveStructured(hit.t, spec, this.tableHeaders(hit.s, hit.t), hit.s === ctx.sheet ? ctx.r : -1);
+    if (box instanceof FErr) throw box;
+    if (box.r1 === box.r2 && box.c1 === box.c2 && box.thisRow) return this.value(hit.s, box.r1, box.c1);
+    return this.rangeArr(hit.s, box.r1, box.c1, box.r2, box.c2);
+  }
+
   /** Resolve a named range or LET/LAMBDA name. */
   private resolveName(name: string, ctx: Ctx): V {
     if (ctx.env.has(name)) return ctx.env.get(name)!;
+    // A table's name on its own means its data rows.
+    if (this.findTable(name)) return this.structured(name, "", ctx);
     const def = this.src.names?.[name] ?? Object.entries(this.src.names ?? {}).find(([k]) => k.toUpperCase() === name)?.[1];
     if (def === undefined) throw new FErr("#NAME?");
     const ast = this.ast(def.startsWith("=") ? def : "=" + def);
@@ -551,6 +705,8 @@ export class Book {
       }
       case "name":
         return this.resolveName(n.name, ctx);
+      case "sref":
+        return this.structured(n.table, n.spec, ctx);
       case "arr":
         return Arr.of(n.rows.map((row) => row.map((x) => scalarOf(this.evaluate(x, ctx)))));
       case "neg":
