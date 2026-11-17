@@ -1,6 +1,7 @@
 import { askConfirm, askText, errorText, toast } from "../../lib/dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownAZ, ArrowDownZA, ExternalLink, Mail, Plus, Redo2, Undo2, X } from "lucide-react";
+import { ArrowDownAZ, ArrowDownZA, ExternalLink, Mail, Plus, Redo2, Sparkles, Undo2, X } from "lucide-react";
+import { AiPanel, type AiHistory } from "../../lib/AiPanel";
 import { findLinks, openLink } from "../../lib/links";
 import Papa from "papaparse";
 import { useFile } from "../../lib/useFile";
@@ -24,6 +25,7 @@ export default function Sheets({ id }: { id: string }) {
   const [edit, setEdit] = useState<{ value: string; fromBar: boolean } | null>(null);
   const [filter, setFilter] = useState("");
   const [headerRow, setHeaderRow] = useState(true);
+  const [showAi, setShowAi] = useState(false);
   const [scroll, setScroll] = useState({ top: 0, height: 600 });
   const history = useRef<{ undo: SheetsData[]; redo: SheetsData[] }>({ undo: [], redo: [] });
   const grid = useRef<HTMLDivElement>(null);
@@ -261,6 +263,21 @@ export default function Sheets({ id }: { id: string }) {
     setActive(data.sheets.length);
   }
 
+  async function askAi(key: string, request: string, history: AiHistory) {
+    if (edit) finishEdit();
+    const { askSheets, applySheetOps } = await import("./ai");
+    const selection = `${colName(range.c1)}${range.r1 + 1}${range.r1 !== range.r2 || range.c1 !== range.c2 ? `:${colName(range.c2)}${range.r2 + 1}` : ""}`;
+    const answer = await askSheets(key, data, active, selection, history, request);
+    if (!answer.ops.length) return answer.reply;
+    const { data: next, applied, focus } = applySheetOps(data, active, answer.ops);
+    if (applied) {
+      commit(next);
+      setActive(focus);
+    }
+    const skipped = answer.ops.length - applied;
+    return answer.reply + (skipped ? `\n\n(${skipped} change${skipped === 1 ? "" : "s"} couldn’t be applied.)` : "");
+  }
+
   // Selection statistics, like the status bar in spreadsheet apps.
   const stats = (() => {
     if (range.r1 === range.r2 && range.c1 === range.c2) return null;
@@ -282,6 +299,7 @@ export default function Sheets({ id }: { id: string }) {
   return (
     <div className="app-page sheets">
       <TitleBar meta={f.meta} onRename={f.rename} saved={f.saved} app="sheets">
+        <button className={showAi ? "on" : ""} title="Ask AI to fill in, calculate or explain (Groq)" aria-pressed={showAi} onClick={() => setShowAi(!showAi)}><Sparkles /> AI</button>
         <Menu label="Export">
           <button onClick={exportCSV}>Download sheet as .csv</button>
           <button onClick={exportXLSX}>Download workbook as .xlsx</button>
@@ -311,6 +329,8 @@ export default function Sheets({ id }: { id: string }) {
         <button onClick={() => importRef.current?.click()} title="Each sheet in the file becomes a new tab here">Add a CSV or Excel file</button>
         <input ref={importRef} type="file" hidden accept=".csv,.tsv,.xlsx,.xls,.ods" onChange={(e) => { const file = e.target.files?.[0]; if (file) importInto(file).catch((err) => toast(`Couldn’t import ${file.name}: ${errorText(err)}`, "error")); e.target.value = ""; }} />
       </div>
+      <div className="sheet-body">
+      <div className="sheet-main">
       <div className="formula-bar">
         <span className="addr">{colName(range.c1)}{range.r1 + 1}{(range.r1 !== range.r2 || range.c1 !== range.c2) && `:${colName(range.c2)}${range.r2 + 1}`}</span>
         <span className="fx">fx</span>
@@ -457,6 +477,17 @@ export default function Sheets({ id }: { id: string }) {
           </span>
         )}
         {filter && <span className="stats">{rows.length - (headerRow ? 1 : 0)} matching rows</span>}
+      </div>
+      </div>
+      {showAi && (
+        <AiPanel
+          intro="I can fill in tables, write formulas, add totals and summaries, clean up or sort data, add sheets, and answer questions about the numbers. One Ctrl+Z undoes a whole answer."
+          quick={["Add a total row under the data", "Summarize this sheet", "Sort by the second column, largest first", "Add a column with each row’s share of the total"]}
+          placeholder="Ask AI about this spreadsheet…"
+          onAsk={askAi}
+          onClose={() => setShowAi(false)}
+        />
+      )}
       </div>
     </div>
   );

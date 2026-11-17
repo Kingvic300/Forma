@@ -11,8 +11,9 @@ Your files stay on your computer. No account, no subscription, no cloud.
 [![Latest release](https://img.shields.io/github/v/release/Kingvic300/Forma?label=release&color=3cc8dc)](https://github.com/Kingvic300/Forma/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-1c2333)](https://kingvic300.github.io/Forma/)
 [![License: MIT](https://img.shields.io/github/license/Kingvic300/Forma?color=1c2333)](LICENSE)
+[![Buy me a coffee](https://img.shields.io/badge/donate-buy%20me%20a%20coffee-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kingvic300)
 
-[**Download**](https://kingvic300.github.io/Forma/) · [Releases](https://github.com/Kingvic300/Forma/releases) · [Contributing](CONTRIBUTING.md)
+[**Download**](https://kingvic300.github.io/Forma/) · [Releases](https://github.com/Kingvic300/Forma/releases) · [Contributing](CONTRIBUTING.md) · [Donate](https://buymeacoffee.com/kingvic300)
 
 <br>
 
@@ -29,6 +30,8 @@ Your files stay on your computer. No account, no subscription, no cloud.
   `Ctrl+6`.
 - **Opens the files you already have.** Word, Excel, PowerPoint, CSV, OpenDocument spreadsheets,
   PDF, HTML, Markdown and plain text, and saves back to the common formats.
+- **AI when you want it.** Ask AI in Docs, Sheets, Slides and PDF to write, edit, calculate or
+  explain, powered by [Groq](https://groq.com) with your own free API key.
 - **Offline and private.** Nothing is uploaded. Forma uses the network only for the opt-in
   features under [Privacy](#privacy).
 - **Free and open source.** MIT licensed, with signed automatic updates.
@@ -45,6 +48,22 @@ Your files stay on your computer. No account, no subscription, no cloud.
 | **Tracker** | Keep tasks with due dates and priority, daily habits with streaks, and a note for each day. | | |
 
 Press `Ctrl+K` to search every file and command, or drop files anywhere in the window to open them.
+
+## Ask AI
+
+Docs, Sheets, Slides and PDF each have an **AI** button that opens a chat beside your file. Describe
+what you want in plain words. The AI reads the open file, makes the change, and tells you what it
+did. One `Ctrl+Z` undoes a whole answer.
+
+| App | Try asking |
+| :-- | :-- |
+| **Docs** | "Summarize this document", "make the selection more formal", "write a conclusion paragraph" |
+| **Sheets** | "Add a total row", "add a column with each row's share of the total", "which month sold most?" |
+| **Slides** | "Make a 6-slide presentation about solar power", "write speaker notes for every slide", "fade in each bullet" |
+| **PDF** | "Change the date to 5 May 2026", "black out the phone number", "add a red box around the total" |
+
+AI uses [Groq](https://console.groq.com). Create a free API key there and paste it once, in the AI
+panel or in **Settings → AI (Groq)**. The key is stored on your computer and works in every app.
 
 <details>
 <summary><b>Forms</b> (paused)</summary>
@@ -107,9 +126,8 @@ speaker notes.
   hidden. Pages with black boxes are saved as pictures, so the words can't be copied or searched.
 - **Pages.** Merge PDFs, and reorder, insert or delete pages. Drag pages and boxes between two PDFs
   open side by side (`Ctrl+\`).
-- **Ask AI.** Describe a change in plain words, such as "change the date to 5 May 2026" or "add a
-  red box around the total". The edits arrive as ordinary annotations, and one `Ctrl+Z` undoes the
-  whole answer. This needs your own free [Groq](https://console.groq.com) API key.
+- **Ask AI.** Describe a change in plain words. The edits arrive as ordinary annotations, so you
+  can move or delete them like your own. See [Ask AI](#ask-ai).
 
 `Ctrl+Z` / `Ctrl+Y` undo and redo every change, including page moves. `Ctrl` + wheel or pinch
 zooms, and `Ctrl+0` resets the zoom.
@@ -134,7 +152,7 @@ Your files never leave your computer unless you use one of these features:
 | :-- | :-- |
 | Update check | A request to GitHub for the latest version. Forma installs only updates signed with the project's key. |
 | Online forms | The form and its answers, to the Supabase project you set up. |
-| Ask AI (PDF) | Your request plus the PDF's text and annotations, to Groq, only when you send a message. Your API key is stored on your computer and sent only to Groq. |
+| Ask AI | Your request plus the open file's content (text, cells, slides or the PDF's text and annotations), to Groq, only when you send a message. Your API key is stored on your computer and sent only to Groq. |
 
 ## Install
 
@@ -199,6 +217,12 @@ Add two repository secrets under **Settings → Secrets and variables → Action
 Keep `~/.tauri/forma.key` backed up. Without it, installed copies can't receive updates.
 
 </details>
+
+## Support Forma
+
+Forma is free, and it will stay free. If it saves you time, you can
+[buy me a coffee](https://buymeacoffee.com/kingvic300) (also in **Settings → Support Forma**).
+Bug reports and pull requests help just as much.
 
 ## License
 

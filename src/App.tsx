@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronsUpDown, Download, FolderOpen, Search, Settings, X } from "lucide-react";
+import { ChevronsUpDown, Coffee, Download, FolderOpen, Search, Settings, X } from "lucide-react";
 import Home from "./Home";
 import { CommandPalette } from "./CommandPalette";
 import { DialogHost, errorText, toast } from "./lib/dialog";
 import { ACCEPT, blank, blankPdf, importFile } from "./lib/importers";
-import { isTauri, onFilesOpened, takeLaunchFiles, toggleFullscreen } from "./lib/platform";
+import { isTauri, onFilesOpened, openExternal, takeLaunchFiles, toggleFullscreen } from "./lib/platform";
+import { DONATE_URL, getGroqKey, setGroqKey } from "./lib/groq";
 import { APPS, go, NAV_APPS, switchTo, useRoute, type AppId } from "./lib/route";
 import { getOnlineConfig, type OnlineConfig } from "./lib/online";
 import { createFile, getSetting, setSetting, useFiles, type Meta } from "./lib/store";
@@ -445,6 +446,11 @@ function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<
   const [auto, setAuto] = useState(true);
   const [online, setOnline] = useState<OnlineConfig | null>(null);
   const [setup, setSetup] = useState(false);
+  const [groq, setGroq] = useState<string | null>(null);
+  const [keyDraft, setKeyDraft] = useState<string | null>(null);
+  useEffect(() => {
+    getGroqKey().then((k) => setGroq(k || null));
+  }, []);
   useEffect(() => {
     getSetting<boolean>("autoUpdate").then((v) => setAuto(v !== false));
   }, []);
@@ -478,6 +484,34 @@ function About({ onClose, updater }: { onClose: () => void; updater: ReturnType<
           <div className="muted small">{online ? `Connected to ${new URL(online.url).hostname}` : "Share forms as a link anyone can fill in. Off until you set it up."}</div>
         </div>
         <button onClick={() => setSetup(true)}>{online ? "Change" : "Set up"}</button>
+      </section>
+      <section className="setting">
+        <div>
+          <div className="setting-title">AI (Groq)</div>
+          <div className="muted small">
+            {groq ? "Key saved on this computer. Ask AI works in Docs, Sheets, Slides and PDF." : "Paste a free key from console.groq.com to use Ask AI in Docs, Sheets, Slides and PDF."}
+          </div>
+          {keyDraft !== null && (
+            <div className="setting-key">
+              <input type="password" placeholder="gsk_…" aria-label="Groq API key" autoFocus value={keyDraft} onChange={(e) => setKeyDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && keyDraft.trim() && (setGroqKey(keyDraft), setGroq(keyDraft.trim()), setKeyDraft(null))} />
+              <button className="primary" disabled={!keyDraft.trim()} onClick={() => { setGroqKey(keyDraft); setGroq(keyDraft.trim()); setKeyDraft(null); }}>Save</button>
+              <button onClick={() => setKeyDraft(null)}>Cancel</button>
+            </div>
+          )}
+        </div>
+        {keyDraft === null && (
+          <span className="setting-actions">
+            {groq && <button onClick={() => { setSetting("groq-key", ""); setGroq(null); }}>Remove</button>}
+            <button onClick={() => setKeyDraft("")}>{groq ? "Change" : "Add key"}</button>
+          </span>
+        )}
+      </section>
+      <section className="setting">
+        <div>
+          <div className="setting-title">Support Forma</div>
+          <div className="muted small">Forma is free and open source. If it saves you time, you can buy the developer a coffee.</div>
+        </div>
+        <button onClick={() => openExternal(DONATE_URL)}><Coffee /> Donate</button>
       </section>
       {isTauri ? (
         <div className="modal-foot">

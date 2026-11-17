@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowDownToLine, ArrowUpToLine, Baseline, Bold, BringToFront, Copy, Download, Eye, EyeOff, ImagePlus, Italic, List,
-  ListOrdered, MoreHorizontal, PaintBucket, PenLine, Play, Plus, Redo2, SendToBack, Shapes, Sparkles, StickyNote, Trash2, Type, Underline, Undo2,
+  ListOrdered, MoreHorizontal, PaintBucket, PenLine, Play, Plus, Redo2, SendToBack, Shapes, Sparkles, StickyNote, Clapperboard, Trash2, Type, Underline, Undo2,
 } from "lucide-react";
 import { errorText, toast } from "../../lib/dialog";
 import { safeName, saveAs } from "../../lib/platform";
@@ -11,6 +11,7 @@ import { useFile } from "../../lib/useFile";
 import { Menu, Missing, TitleBar, usePane } from "../../ui";
 import { Player, schedule } from "./anim";
 import { AnimPanel } from "./AnimPanel";
+import { AiPanel, type AiHistory } from "../../lib/AiPanel";
 import { Present } from "./Present";
 import { Paragraphs, SlideView, textBoxStyle, Thumb, AssetContext } from "./render";
 import { domToBody, formatAt, formatParas, formatRuns, getSel, setSel as setDomSel, type Sel } from "./textEdit";
@@ -60,7 +61,7 @@ export default function Slides({ id }: { id: string }) {
   const [cur, setCur] = useState(0);
   const [sel, setSel] = useState<string[]>([]);
   const [editing, setEditing] = useState<{ id: string; session: number } | null>(null);
-  const [panel, setPanel] = useState(false);
+  const [panel, setPanel] = useState<"" | "anim" | "ai">("");
   const [notes, setNotes] = useState(true);
   const [presenting, setPresenting] = useState<number | null>(null);
   const [scale, setScale] = useState(0.5);
@@ -601,6 +602,22 @@ export default function Slides({ id }: { id: string }) {
     }, 600);
   }
 
+  async function askAi(key: string, request: string, history: AiHistory) {
+    if (editing) finishEdit();
+    const before = dataRef.current!;
+    const { askSlides, applyOps } = await import("./ai");
+    const answer = await askSlides(key, before, idx, sel, history, request);
+    if (!answer.ops.length) return answer.reply;
+    const { deck: next, applied, focus } = applyOps(dataRef.current!, answer.ops);
+    if (applied) {
+      commit(next);
+      setSel([]);
+      if (focus !== undefined) setCur(focus);
+    }
+    const skipped = answer.ops.length - applied;
+    return answer.reply + (skipped ? `\n\n(${skipped} change${skipped === 1 ? "" : "s"} couldn’t be applied.)` : "");
+  }
+
   async function download() {
     if (!deck || !f.meta) return;
     try {
@@ -630,7 +647,8 @@ export default function Slides({ id }: { id: string }) {
         <button className="icon" title="Undo (Ctrl+Z)" aria-label="Undo" onClick={undo} disabled={!history.current.undo.length}><Undo2 /></button>
         <button className="icon" title="Redo (Ctrl+Y)" aria-label="Redo" onClick={redo} disabled={!history.current.redo.length}><Redo2 /></button>
         <button className={"icon" + (notes ? " on" : "")} title="Speaker notes" aria-label="Speaker notes" aria-pressed={notes} onClick={() => setNotes(!notes)}><StickyNote /></button>
-        <button className={panel ? "on" : ""} title="Animations and transitions" aria-pressed={panel} onClick={() => setPanel(!panel)}><Sparkles /> Animations</button>
+        <button className={panel === "anim" ? "on" : ""} title="Animations and transitions" aria-pressed={panel === "anim"} onClick={() => setPanel(panel === "anim" ? "" : "anim")}><Clapperboard /> Animations</button>
+        <button className={panel === "ai" ? "on" : ""} title="Ask AI to write or change slides (Groq)" aria-pressed={panel === "ai"} onClick={() => setPanel(panel === "ai" ? "" : "ai")}><Sparkles /> AI</button>
         <Menu label={<><Download /> Download</>}>
           <button role="menuitem" onClick={download}>PowerPoint (.pptx)</button>
         </Menu>
@@ -792,7 +810,7 @@ export default function Slides({ id }: { id: string }) {
               <span className="sl-num">{i + 1}</span>
               <button className="sl-thumb-btn" aria-label={`Slide ${i + 1}`} aria-current={i === idx} onClick={() => goSlide(i)}>
                 <Thumb deck={deck} slide={s} width={150} />
-                {s.anims.length > 0 && <Sparkles className="sl-has-fx" aria-label="Has animations" />}
+                {s.anims.length > 0 && <Clapperboard className="sl-has-fx" aria-label="Has animations" />}
               </button>
               <Menu label={<MoreHorizontal />} className="icon sl-rail-more" align="left">
                 <button role="menuitem" onClick={() => duplicateSlide(i)}><Copy /> Duplicate</button>
@@ -875,7 +893,16 @@ export default function Slides({ id }: { id: string }) {
           )}
         </div>
 
-        {panel && (
+        {panel === "ai" && (
+          <AiPanel
+            intro="I can write a whole presentation from a topic, add or reorder slides, rewrite text, restyle shapes, add speaker notes, animations and transitions, or answer questions about the deck. One Ctrl+Z undoes a whole answer."
+            quick={["Add a summary slide at the end", "Make this slide more concise", "Write speaker notes for every slide", "Add a fade-in to each bullet list", "Use a dark theme on all slides", "Give every slide a push transition"]}
+            placeholder="Ask AI to work on these slides…"
+            onAsk={askAi}
+            onClose={() => setPanel("")}
+          />
+        )}
+        {panel === "anim" && (
           <AnimPanel
             slide={slide}
             selected={one}

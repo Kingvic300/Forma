@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, BringToFront, CalendarDays, Check, ClipboardPaste, Copy, CopyPlus, SendToBack, Scissors, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Send, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, BringToFront, CalendarDays, Check, ClipboardPaste, Copy, CopyPlus, SendToBack, Scissors, Eraser, EyeOff, FilePlus2, GripVertical, Highlighter, Circle, ImageIcon, Minus, MousePointer2, MoveUpRight, PenLine, Redo2, Sparkles, TextCursorInput, Signature, Square, Table2, Trash2, Type, Undo2, X as XIcon, ZoomIn, ZoomOut } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -17,7 +17,8 @@ import { bounds, cloneAnns, copyBoxes, DROP_ANN, DROP_PAGE, ghost, hasClip, keep
 import { ContextMenu, type MenuEntry } from "../docs/menus";
 import { imageToPng, SignaturePad } from "./SignaturePad";
 import { isBoldName, matchFont } from "./fonts";
-import { askAi, getGroqKey, setGroqKey, type AiOp } from "./ai";
+import { askAi, type AiOp } from "./ai";
+import { AiPanel as SharedAiPanel, type AiHistory } from "../../lib/AiPanel";
 import { arrowHead, CELL_PAD, colsOf, CSS_FONT, dashArray, FONT_LABEL, HEAD_FILL, lineEnds, newTable, rowsOf, tableCol, tableRow, fmtAt, formatCells, type Ann, type CellFmt, type Dash, type Font, type PdfData, type Span } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -1044,73 +1045,15 @@ export default function Pdf({ id }: { id: string }) {
   );
 }
 
-type Chat = { role: "user" | "assistant"; content: string; error?: boolean };
-
-function AiPanel({ onAsk, onClose }: { onAsk: (key: string, request: string, history: { role: "user" | "assistant"; content: string }[]) => Promise<string>; onClose: () => void }) {
-  const [key, setKey] = useState<string | null | undefined>(undefined);
-  const [draftKey, setDraftKey] = useState("");
-  const [chat, setChat] = useState<Chat[]>([]);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const end = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    getGroqKey().then((k) => setKey(k || null));
-  }, []);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [chat, busy]);
-
-  async function send() {
-    const request = text.trim();
-    if (!request || busy || !key) return;
-    const history = chat.filter((m) => !m.error).slice(-6).map(({ role, content }) => ({ role, content }));
-    setChat((c) => [...c, { role: "user", content: request }]);
-    setText("");
-    setBusy(true);
-    try {
-      const reply = await onAsk(key, request, history);
-      setChat((c) => [...c, { role: "assistant", content: reply }]);
-    } catch (e) {
-      setChat((c) => [...c, { role: "assistant", content: errorText(e), error: true }]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+function AiPanel({ onAsk, onClose }: { onAsk: (key: string, request: string, history: AiHistory) => Promise<string>; onClose: () => void }) {
   return (
-    <aside className="fields ai">
-      <div className="ai-head">
-        <h3><Sparkles size={14} /> Ask AI</h3>
-        <span className="grow" />
-        {key && <button className="icon" title="Change Groq API key" onClick={() => { setDraftKey(""); setKey(null); }}>Key</button>}
-        <button className="icon" title="Close" onClick={onClose}><XIcon size={14} /></button>
-      </div>
-      {key === undefined ? null : !key ? (
-        <>
-          <p className="muted">Paste a Groq API key to use this. It stays on this computer and is sent only to Groq.</p>
-          <input type="password" placeholder="gsk_…" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && draftKey.trim()) { setGroqKey(draftKey); setKey(draftKey.trim()); } }} />
-          <button className="primary" disabled={!draftKey.trim()} onClick={() => { setGroqKey(draftKey); setKey(draftKey.trim()); }}>Save key</button>
-        </>
-      ) : (
-        <>
-          <div className="ai-chat">
-            {!chat.length && <p className="muted">Tell me what to change. For example: “change the date to 5 May 2026”, “black out the phone number”, “add a red box around the total”, “underline the title”.</p>}
-            {chat.map((m, i) => <div key={i} className={`ai-msg ${m.role}${m.error ? " error" : ""}`}>{m.content}</div>)}
-            {busy && <div className="ai-msg assistant muted">Working…</div>}
-            <div ref={end} />
-          </div>
-          <div className="ai-input">
-            <textarea
-              rows={3}
-              placeholder="Ask AI to edit this PDF…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            />
-            <button className="primary" disabled={busy || !text.trim()} onClick={send} title="Send (Enter)"><Send size={14} /></button>
-          </div>
-        </>
-      )}
-    </aside>
+    <SharedAiPanel
+      intro="Tell me what to change. For example: “change the date to 5 May 2026”, “black out the phone number”, “add a red box around the total”, “underline the title”. One Ctrl+Z undoes a whole answer."
+      quick={["Summarize this PDF", "Black out phone numbers and emails", "Add today’s date at the top right"]}
+      placeholder="Ask AI to edit this PDF…"
+      onAsk={onAsk}
+      onClose={onClose}
+    />
   );
 }
 

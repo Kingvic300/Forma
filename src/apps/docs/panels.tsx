@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, MessageSquare, Send, Sparkles, X } from "lucide-react";
-import { errorText } from "../../lib/dialog";
-import { getGroqKey, setGroqKey } from "../../lib/groq";
+import { ChevronDown, ChevronUp, MessageSquare, X } from "lucide-react";
+import { AiPanel as SharedAiPanel, type AiHistory } from "../../lib/AiPanel";
 import { Modal } from "../../ui";
 import { counts, selectRange } from "./editor";
 import { PAPER, type PageSetup } from "./setup";
@@ -389,76 +388,17 @@ export function CommentsPanel({ comments, order, active, draft, onSelect, onSave
 
 /* ---------- AI (Groq) ---------- */
 
-type Chat = { role: "user" | "assistant"; content: string; error?: boolean };
-
-export function AiPanel({ seed, hasSelection, onAsk, onClose }: { seed: { text: string; n: number } | null; hasSelection: boolean; onAsk: (key: string, request: string, history: { role: "user" | "assistant"; content: string }[]) => Promise<string>; onClose: () => void }) {
-  const [key, setKey] = useState<string | null | undefined>(undefined);
-  const [draftKey, setDraftKey] = useState("");
-  const [chat, setChat] = useState<Chat[]>([]);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => void getGroqKey().then((k) => setKey(k || null)), []);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [chat, busy]);
-  useEffect(() => {
-    if (seed && key) send(seed.text);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seed?.n, key]);
-
-  async function send(request = text.trim()) {
-    if (!request || busy || !key) return;
-    const history = chat.filter((m) => !m.error).slice(-6).map(({ role, content }) => ({ role, content }));
-    setChat((c) => [...c, { role: "user", content: request }]);
-    setText("");
-    setBusy(true);
-    try {
-      const reply = await onAsk(key, request, history);
-      setChat((c) => [...c, { role: "assistant", content: reply }]);
-    } catch (e) {
-      setChat((c) => [...c, { role: "assistant", content: errorText(e), error: true }]);
-    } finally {
-      setBusy(false);
-    }
-  }
-  const saveKey = () => {
-    if (!draftKey.trim()) return;
-    setGroqKey(draftKey);
-    setKey(draftKey.trim());
-  };
-  const QUICK = hasSelection ? ["Improve the selected text", "Fix grammar in the selection", "Summarize the selection", "Translate the selection to French"] : ["Summarize this document", "Suggest a better title", "Fix spelling and grammar in the whole document", "Write a conclusion paragraph at the cursor"];
+export function AiPanel({ seed, hasSelection, onAsk, onClose }: { seed: { text: string; n: number } | null; hasSelection: boolean; onAsk: (key: string, request: string, history: AiHistory) => Promise<string>; onClose: () => void }) {
+  const quick = hasSelection
+    ? ["Improve the selected text", "Fix grammar in the selection", "Summarize the selection", "Translate the selection to French"]
+    : ["Summarize this document", "Suggest a better title", "Fix spelling and grammar in the whole document", "Write a conclusion paragraph at the cursor"];
   return (
-    <aside className="fields ai">
-      <div className="ai-head">
-        <h3><Sparkles size={14} /> AI (Groq)</h3>
-        <span className="grow" />
-        {key && <button className="icon" title="Change Groq API key" onClick={() => { setDraftKey(""); setKey(null); }}>Key</button>}
-        <button className="icon" title="Close" onClick={onClose}><X size={14} /></button>
-      </div>
-      {key === undefined ? null : !key ? (
-        <>
-          <p className="muted">Paste a Groq API key to use AI. It stays on this computer and is sent only to Groq. The same key works in the PDF editor.</p>
-          <input type="password" placeholder="gsk_…" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveKey()} />
-          <button className="primary" disabled={!draftKey.trim()} onClick={saveKey}>Save key</button>
-        </>
-      ) : (
-        <>
-          <div className="ai-chat">
-            {!chat.length && (
-              <>
-                <p className="muted">Ask about this document or tell me what to change. {hasSelection ? "I’ll work on the selected text." : "Select text first to change just that part."} Ctrl+Z undoes any edit.</p>
-                <div className="ai-quick">{QUICK.map((q) => <button key={q} onMouseDown={(e) => e.preventDefault()} onClick={() => send(q)}>{q}</button>)}</div>
-              </>
-            )}
-            {chat.map((m, i) => <div key={i} className={`ai-msg ${m.role}${m.error ? " error" : ""}`}>{m.content}</div>)}
-            {busy && <div className="ai-msg assistant muted">Working…</div>}
-            <div ref={end} />
-          </div>
-          <div className="ai-input">
-            <textarea rows={3} placeholder="Ask AI…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-            <button className="primary" disabled={busy || !text.trim()} onClick={() => send()} title="Send (Enter)"><Send size={14} /></button>
-          </div>
-        </>
-      )}
-    </aside>
+    <SharedAiPanel
+      intro={`Ask about this document or tell me what to change. ${hasSelection ? "I’ll work on the selected text." : "Select text first to change just that part."} Ctrl+Z undoes any edit.`}
+      quick={quick}
+      seed={seed}
+      onAsk={onAsk}
+      onClose={onClose}
+    />
   );
 }

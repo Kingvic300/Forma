@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CornerDownLeft, Download, Expand, FilePlus2, FolderOpen, Maximize2, Search, Settings } from "lucide-react";
+import { ArrowRight, Coffee, CornerDownLeft, Download, Expand, FilePlus2, FolderOpen, Maximize2, Search, Settings } from "lucide-react";
+import { DONATE_URL } from "./lib/groq";
 import { blank } from "./lib/importers";
-import { isTauri, toggleFullscreen, toggleMaximize } from "./lib/platform";
+import { isTauri, openExternal, toggleFullscreen, toggleMaximize } from "./lib/platform";
 import { go, NAV_APPS, switchTo, type AppId } from "./lib/route";
 import { createFile, useFiles, type Kind } from "./lib/store";
 import { AppIcon, timeAgo } from "./ui";
@@ -56,6 +57,7 @@ export function CommandPalette({ open, setOpen, current, onOpenFile, onSettings,
       out.push({ id: "go-" + a.id, group: "Go to", title: a.name, hint: a.blurb, icon: <AppIcon app={a.id} size={22} />, keys: `Ctrl ${NAV_APPS.indexOf(a) + 1}`, run: () => switchTo(a.id, current) }),
     );
     if (match("Settings preferences")) out.push({ id: "settings", group: "Forma", title: "Settings", icon: <Settings />, keys: "Ctrl ,", run: onSettings });
+    if (match("Donate support buy me a coffee sponsor")) out.push({ id: "donate", group: "Forma", title: "Donate: buy me a coffee", icon: <Coffee />, run: () => openExternal(DONATE_URL) });
     if (onCheckUpdates && match("Check for updates")) out.push({ id: "update", group: "Forma", title: "Check for updates", icon: <Download />, run: onCheckUpdates });
     if (isTauri && match("Maximise maximize restore window size")) out.push({ id: "maximize", group: "Window", title: "Maximise or restore window", icon: <Maximize2 />, run: toggleMaximize });
     if (match("Full screen fullscreen")) out.push({ id: "fullscreen", group: "Window", title: "Full screen", icon: <Expand />, keys: "F11", run: toggleFullscreen });

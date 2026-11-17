@@ -901,3 +901,8 @@ button.sl-rail-more .chev { display: none; }
 .present:not(.idle) .pr-bar:hover, .present:not(.idle):hover .pr-bar { opacity: 1; }
 .pr-bar .icon { color: #ddd; }
 .titlebar button.icon.on, .titlebar button.icon.on:hover:not(:disabled) { background: var(--cyan-soft); color: var(--cyan); }
+.sheet-body { flex: 1; min-height: 0; display: flex; }
+.sheet-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.setting-key { display: flex; gap: 6px; margin-top: 8px; }
+.setting-key input { flex: 1; min-width: 0; }
+.setting-actions { display: inline-flex; gap: 6px; flex: none; }
