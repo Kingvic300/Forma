@@ -32,10 +32,12 @@ const CLASSES: { cls: Effect["cls"]; name: string }[] = [
   { cls: "path", name: "Motion path" },
 ];
 
-export function targetName(slide: Slide, target: string) {
+export function targetName(slide: Slide, target: string, paras?: [number, number]) {
   const el = slide.els.find((e) => e.id === target);
   if (!el) return slide.els.some((e) => e.groups?.includes(target)) ? "Group" : "Missing";
-  const text = plainText(el.text).trim().replace(/\s+/g, " ");
+  // A paragraph build is named after its own paragraphs, not the whole box.
+  const body = el.text && paras ? { ...el.text, paras: el.text.paras.slice(paras[0], paras[1] + 1) } : el.text;
+  const text = plainText(body).trim().replace(/\s+/g, " ");
   return text ? (text.length > 28 ? text.slice(0, 27) + "…" : text) : el.name || (el.type === "image" ? "Picture" : el.type === "media" ? "Video" : el.type === "table" ? "Table" : el.type === "chart" ? "Chart" : "Shape");
 }
 
@@ -101,14 +103,19 @@ export function AnimPanel({ slide, selected, onChange, onSelect, onPreview, onAp
       <ol className="sl-fx-list">
         {slide.anims.map((e, i) => (
           <li key={e.id} className={"sl-fx " + e.cls + (selected && (selected.id === e.target || selected.groups?.includes(e.target)) ? " on" : "")}>
+            <div className="sl-fx-head">
             <button className="sl-fx-name" onClick={() => onSelect(e.target)} title="Select what this effect animates">
               <span className="sl-fx-step">{e.trigger === "click" || i === 0 ? stepOf.get(e.id) ?? "" : ""}</span>
               <span className="sl-fx-dot" />
               <span className="sl-fx-text">
                 <b>{effectName(e)}</b>
-                <span>{targetName(slide, e.target)}{e.paras ? ` (paragraph ${e.paras[0] + 1}${e.paras[1] !== e.paras[0] ? `–${e.paras[1] + 1}` : ""})` : ""}</span>
+                <span>{targetName(slide, e.target, e.paras)}</span>
               </span>
             </button>
+              <button className="icon" title="Earlier" aria-label="Move earlier" disabled={!i} onClick={() => move(i, -1)}><ArrowUp /></button>
+              <button className="icon" title="Later" aria-label="Move later" disabled={i === slide.anims.length - 1} onClick={() => move(i, 1)}><ArrowDown /></button>
+              <button className="icon" title="Remove effect" aria-label="Remove effect" onClick={() => setAnims(slide.anims.filter((_, j) => j !== i))}><X /></button>
+            </div>
             <div className="sl-fx-row">
               <select value={e.trigger} aria-label="Start" onChange={(ev) => patch(i, { trigger: ev.target.value as Effect["trigger"] })}>
                 <option value="click">On click</option>
@@ -134,10 +141,6 @@ export function AnimPanel({ slide, selected, onChange, onSelect, onPreview, onAp
                 <input type="number" min={0} step={0.25} value={secs(e.delay)} onChange={(ev) => patch(i, { delay: Math.max(0, Number(ev.target.value) * 1000) }, "delay" + e.id)} />
                 s
               </label>
-              <span className="grow" />
-              <button className="icon" title="Earlier" aria-label="Move earlier" disabled={!i} onClick={() => move(i, -1)}><ArrowUp /></button>
-              <button className="icon" title="Later" aria-label="Move later" disabled={i === slide.anims.length - 1} onClick={() => move(i, 1)}><ArrowDown /></button>
-              <button className="icon" title="Remove effect" aria-label="Remove effect" onClick={() => setAnims(slide.anims.filter((_, j) => j !== i))}><X /></button>
             </div>
           </li>
         ))}

@@ -865,7 +865,9 @@ button.sl-rail-more .chev { display: none; }
 .sl-fx-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .sl-fx { padding: 6px; border: 1px solid var(--line); border-radius: var(--r); background: var(--well); }
 .sl-fx.on { border-color: var(--cyan); }
-.sl-fx-name { width: 100%; height: auto; justify-content: flex-start; gap: 8px; padding: 2px; background: none; border: 0; box-shadow: none; text-align: left; }
+.sl-fx-head { display: flex; align-items: flex-start; gap: 0; }
+.sl-fx-head .icon { height: 24px; padding: 0 3px; }
+.sl-fx-name { flex: 1; min-width: 0; height: auto; justify-content: flex-start; gap: 8px; padding: 2px; background: none; border: 0; box-shadow: none; text-align: left; }
 .sl-fx-name:hover:not(:disabled) { background: none; }
 .sl-fx-step { width: 16px; flex: none; text-align: right; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .sl-fx-dot { width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--ok); }
@@ -875,10 +877,10 @@ button.sl-rail-more .chev { display: none; }
 .sl-fx-text { min-width: 0; display: flex; flex-direction: column; }
 .sl-fx-text b { font-weight: 600; font-size: 12.5px; }
 .sl-fx-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); }
-.sl-fx-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: var(--text-2); }
-.sl-fx-row select { height: 26px; padding: 0 4px; font-size: 12px; }
+.sl-fx-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0 0 34px; font-size: 12px; color: var(--text-2); }
+.sl-fx-row select { flex: 1; min-width: 0; height: 26px; padding: 0 4px; font-size: 12px; }
 .sl-fx-row label { display: inline-flex; align-items: center; gap: 2px; }
-.sl-fx-row input { width: 44px; height: 26px; padding: 0 4px; font-size: 12px; }
+.sl-fx-row input { width: 40px; height: 26px; padding: 0 4px; font-size: 12px; }
 .sl-fx-row .icon { height: 26px; padding: 0 3px; }
 .sl-fx-empty { padding: 8px 2px; }
 .sl-trans { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }

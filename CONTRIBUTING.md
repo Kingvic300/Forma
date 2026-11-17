@@ -1,7 +1,7 @@
 # Contributing to Forma
 
 Thanks for helping. Forma is a desktop app (Tauri 2 + React) for documents, spreadsheets,
-forms, PDFs and personal tracking. Everything runs offline on the user's computer, and that
+presentations, forms, PDFs and personal tracking. Everything runs offline on the user's computer, and that
 promise shapes most of the rules below.
 
 ## Getting set up
@@ -32,7 +32,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 | `src/App.tsx` | Window shell: sidebar, app switcher, shortcuts, settings |
 | `src/CommandPalette.tsx` | `Ctrl+K` palette |
 | `src/Home.tsx` | File list for each app |
-| `src/apps/` | One folder or file per app: Docs, Sheets, Forms, PDF, Tracker |
+| `src/apps/` | One folder or file per app: Docs, Sheets, Slides, Forms, PDF, Tracker |
 | `src/lib/store.ts` | File storage (IndexedDB) |
 | `src/lib/useFile.ts` | Load a file and autosave changes |
 | `src/lib/importers.ts` | Turning files from disk into Forma files |
